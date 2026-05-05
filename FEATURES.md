@@ -23,9 +23,9 @@ Track all planned features here. Check off each one after it's implemented and t
 - [ ] Bulk actions — select multiple tickets and assign, close, or change status in one go
 
 ### User & Access
-- [ ] Forgot password — email-based password reset flow
-- [ ] Change own password — from the profile/settings page
-- [ ] Deactivate users — admin can disable accounts without deleting them (e.g. when someone leaves)
+- [x] Admin can reset user passwords
+- [x] Admin can delete users (tickets remain, assignments cleared)
+- [x] Deactivate users — admin can disable accounts without deleting them (e.g. when someone leaves)
 
 ### Visibility & Reporting
 - [ ] Dashboard stats — summary cards showing open / in-progress / resolved counts and average resolution time
@@ -56,3 +56,16 @@ Track all planned features here. Check off each one after it's implemented and t
 - [x] Mobile responsive layout
 - [x] Rate limiting on auth endpoints (brute force protection)
 - [x] Shared Axios instance with auto auth headers
+
+
+Search — immediate pain point at scale
+Password reset — you'll get support requests for this constantly
+Notification preferences (your list)
+SLA / due dates — gives the system real operational value
+Admin assign + void tickets (your list)
+Dashboard stats
+CSV import (your list)
+Ticket re-open
+Deactivate users + change password
+Audit log
+Bulk actions + export

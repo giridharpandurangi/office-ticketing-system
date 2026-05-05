@@ -511,3 +511,29 @@ button:disabled {
   transform: none;
   box-shadow: none;
 }
+
+/* ── Admin action buttons ── */
+.btn-action {
+  border: none;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  transition: all 0.2s ease;
+  box-shadow: none;
+}
+
+.btn-action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+}
+
+.btn-blue  { background: #3498db; }
+.btn-orange { background: #e67e22; }
+.btn-red   { background: #e74c3c; }
+
+.btn-blue:hover  { background: #2980b9; }
+.btn-orange:hover { background: #d35400; }
+.btn-red:hover   { background: #c0392b; }

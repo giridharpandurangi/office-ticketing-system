@@ -141,4 +141,65 @@ router.patch('/:id/role', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// Reset user password (admin only)
+router.patch('/:id/reset-password', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    // Admin cannot reset their own password from this endpoint
+    if (parseInt(id) === req.user.id) {
+      return res.status(400).json({ error: 'Use the profile page to change your own password.' });
+    }
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+
+    const hashedPassword = await bcryptjs.hash(password, 10);
+
+    const result = await pool.query(
+      'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, email, name',
+      [hashedPassword, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ message: `Password reset successfully for ${result.rows[0].name}.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete user (admin only)
+router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Admin cannot delete themselves
+    if (parseInt(id) === req.user.id) {
+      return res.status(400).json({ error: 'You cannot delete your own account.' });
+    }
+
+    const userResult = await pool.query('SELECT name, role FROM users WHERE id = $1', [id]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Unassign any tickets assigned to this user before deleting
+    await pool.query(
+      'UPDATE tickets SET assigned_to = NULL WHERE assigned_to = $1',
+      [id]
+    );
+
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+
+    res.json({ message: `User "${userResult.rows[0].name}" has been deleted.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

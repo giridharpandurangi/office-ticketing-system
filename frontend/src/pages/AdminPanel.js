@@ -6,17 +6,20 @@ function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [submitting, setSubmitting] = useState(false); // Fix #13
-  const [newUser, setNewUser] = useState({
-    email: '',
-    password: '',
-    name: '',
-    role: 'user'
-  });
-  // Fix #16: Confirmation state before role change
-  const [pendingRoleChange, setPendingRoleChange] = useState(null); // { userId, userName, newRole }
+  const [submitting, setSubmitting] = useState(false);
+  const [newUser, setNewUser] = useState({ email: '', password: '', name: '', role: 'user' });
+
+  // Confirmation dialogs
+  const [pendingRoleChange, setPendingRoleChange] = useState(null);   // { userId, userName, newRole }
+  const [pendingDelete, setPendingDelete] = useState(null);           // { userId, userName }
+  const [pendingReset, setPendingReset] = useState(null);             // { userId, userName }
+  const [newPassword, setNewPassword] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+
   const navigate = useNavigate();
+  const ROLE_LABELS = { user: 'User', engineer: 'Engineer', admin: 'Admin' };
 
   useEffect(() => {
     fetchUsers();
@@ -34,14 +37,21 @@ function AdminPanel() {
     }
   };
 
+  const showSuccess = (msg) => {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(''), 4000);
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     if (submitting) return;
     setSubmitting(true);
+    setError('');
     try {
       await api.post('/api/users', newUser);
       setNewUser({ email: '', password: '', name: '', role: 'user' });
       setShowForm(false);
+      showSuccess(`User "${newUser.name}" created successfully.`);
       fetchUsers();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to create user');
@@ -50,7 +60,7 @@ function AdminPanel() {
     }
   };
 
-  // Fix #16: Show confirmation dialog before applying role change
+  // Role change
   const requestRoleChange = (userId, userName, currentRole, newRole) => {
     if (newRole === currentRole) return;
     setPendingRoleChange({ userId, userName, newRole });
@@ -58,24 +68,62 @@ function AdminPanel() {
 
   const confirmRoleChange = async () => {
     if (!pendingRoleChange) return;
-    const { userId, newRole } = pendingRoleChange;
+    setActionLoading(true);
     try {
-      await api.patch(`/api/users/${userId}/role`, { role: newRole });
+      await api.patch(`/api/users/${pendingRoleChange.userId}/role`, { role: pendingRoleChange.newRole });
+      showSuccess(`${pendingRoleChange.userName}'s role updated to ${ROLE_LABELS[pendingRoleChange.newRole]}.`);
       fetchUsers();
     } catch (err) {
       setError('Failed to update user role');
     } finally {
       setPendingRoleChange(null);
+      setActionLoading(false);
     }
   };
 
-  const ROLE_LABELS = { user: 'User', engineer: 'Engineer', admin: 'Admin' };
+  // Reset password
+  const confirmResetPassword = async () => {
+    if (!pendingReset) return;
+    if (!newPassword || newPassword.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    setActionLoading(true);
+    setError('');
+    try {
+      const res = await api.patch(`/api/users/${pendingReset.userId}/reset-password`, { password: newPassword });
+      showSuccess(res.data.message);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to reset password');
+    } finally {
+      setPendingReset(null);
+      setNewPassword('');
+      setActionLoading(false);
+    }
+  };
+
+  // Delete user
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setActionLoading(true);
+    try {
+      const res = await api.delete(`/api/users/${pendingDelete.userId}`);
+      showSuccess(res.data.message);
+      fetchUsers();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete user');
+    } finally {
+      setPendingDelete(null);
+      setActionLoading(false);
+    }
+  };
 
   return (
     <div className="container">
       <h1>Admin Panel — User Management</h1>
 
       {error && <div className="error">{error}</div>}
+      {success && <div className="success">{success}</div>}
 
       {!showForm && (
         <button onClick={() => setShowForm(true)} style={{ marginBottom: '1rem' }}>
@@ -97,12 +145,13 @@ function AdminPanel() {
               />
             </div>
             <div className="form-group">
-              <label>Email</label>
+              <label>Email / Login ID</label>
               <input
-                type="email"
+                type="text"
                 value={newUser.email}
                 onChange={(e) => setNewUser(prev => ({ ...prev, email: e.target.value }))}
                 required
+                placeholder="e.g. john@ticketing.local"
               />
             </div>
             <div className="form-group">
@@ -158,7 +207,6 @@ function AdminPanel() {
                   <td>{u.name}</td>
                   <td>{u.email}</td>
                   <td>
-                    {/* Fix #16: onChange triggers confirmation dialog, not immediate API call */}
                     <select
                       value={u.role}
                       onChange={(e) => requestRoleChange(u.id, u.name, u.role, e.target.value)}
@@ -170,13 +218,26 @@ function AdminPanel() {
                   </td>
                   <td className="hide-mobile">{new Date(u.created_at).toLocaleDateString()}</td>
                   <td>
-                    {/* Fix #6: "View Tickets" button now navigates with filter */}
-                    <button
-                      style={{ background: '#3498db', fontSize: '12px', padding: '0.4rem 0.75rem' }}
-                      onClick={() => navigate(`/?user=${u.id}`)}
-                    >
-                      View Tickets
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        className="btn-action btn-blue"
+                        onClick={() => navigate(`/?user=${u.id}`)}
+                      >
+                        Tickets
+                      </button>
+                      <button
+                        className="btn-action btn-orange"
+                        onClick={() => { setPendingReset({ userId: u.id, userName: u.name }); setNewPassword(''); setError(''); }}
+                      >
+                        Reset PW
+                      </button>
+                      <button
+                        className="btn-action btn-red"
+                        onClick={() => setPendingDelete({ userId: u.id, userName: u.name })}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -185,7 +246,7 @@ function AdminPanel() {
         </div>
       )}
 
-      {/* Fix #16: Role change confirmation dialog */}
+      {/* Role change confirmation */}
       {pendingRoleChange && (
         <div className="confirm-overlay">
           <div className="confirm-box">
@@ -195,13 +256,70 @@ function AdminPanel() {
               <strong>{ROLE_LABELS[pendingRoleChange.newRole]}</strong>?
             </p>
             <div className="confirm-actions">
-              <button
-                onClick={() => setPendingRoleChange(null)}
-                style={{ background: '#6c757d' }}
-              >
+              <button onClick={() => setPendingRoleChange(null)} style={{ background: '#6c757d' }}>
                 Cancel
               </button>
-              <button onClick={confirmRoleChange}>Confirm</button>
+              <button onClick={confirmRoleChange} disabled={actionLoading}>
+                {actionLoading ? 'Saving...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset password dialog */}
+      {pendingReset && (
+        <div className="confirm-overlay">
+          <div className="confirm-box">
+            <h3>Reset Password</h3>
+            <p>Set a new password for <strong>{pendingReset.userName}</strong>.</p>
+            {error && <div className="error" style={{ marginBottom: '1rem' }}>{error}</div>}
+            <div className="form-group">
+              <label>New Password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Minimum 6 characters"
+                minLength={6}
+                autoFocus
+              />
+            </div>
+            <div className="confirm-actions">
+              <button onClick={() => { setPendingReset(null); setError(''); }} style={{ background: '#6c757d' }}>
+                Cancel
+              </button>
+              <button onClick={confirmResetPassword} disabled={actionLoading || newPassword.length < 6}>
+                {actionLoading ? 'Resetting...' : 'Reset Password'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {pendingDelete && (
+        <div className="confirm-overlay">
+          <div className="confirm-box">
+            <h3>Delete User</h3>
+            <p>
+              Are you sure you want to delete <strong>{pendingDelete.userName}</strong>?
+              <br />
+              <span style={{ color: '#e74c3c', fontSize: '14px' }}>
+                This cannot be undone. Their tickets will remain but become unassigned.
+              </span>
+            </p>
+            <div className="confirm-actions">
+              <button onClick={() => setPendingDelete(null)} style={{ background: '#6c757d' }}>
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={actionLoading}
+                style={{ background: 'linear-gradient(45deg, #e74c3c, #c0392b)' }}
+              >
+                {actionLoading ? 'Deleting...' : 'Delete User'}
+              </button>
             </div>
           </div>
         </div>
