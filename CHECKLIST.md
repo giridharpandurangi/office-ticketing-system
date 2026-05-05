@@ -148,6 +148,18 @@ Store in cloud or external drive
 - [ ] Archive old tickets
 - [ ] Update backups
 - [ ] Check for errors in logs
+
+## Planned Features
+
+- [x] When engineer changes state of ticket, comment is mandatory
+- [ ] Add submit button for engineer and user (nice to have, not mandatory)
+- [ ] Implement SMTP tool for email reminders:
+  - [ ] Email to user when ticket state changes or ticket closes
+  - [ ] Email to engineer when ticket is created by user
+- [ ] Admin access enhancements:
+  - [ ] Admin can void tickets
+  - [ ] Admin can assign tickets
+- [ ] Import users from Excel or CSV (important, auto-generate password option not mandatory)
 - [ ] Plan for upgrades/improvements
 
 ## Escalation Path (When Issues)

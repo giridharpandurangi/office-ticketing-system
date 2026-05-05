@@ -193,44 +193,74 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
 });
 
 // Update ticket status (engineer only)
-router.patch('/:id', authMiddleware, engineerOnly, async (req, res) => {
+router.patch('/:id', authMiddleware, engineerOnly, [
+  body('status').optional().isIn(['open', 'in_progress', 'resolved']),
+  body('assigned_to').optional().isInt(),
+  body('comment').if(body('status').exists()).notEmpty().withMessage('Comment is required when changing ticket status')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
   try {
     const { id } = req.params;
-    const { status, assigned_to } = req.body;
+    const { status, assigned_to, comment } = req.body;
 
-    let query = 'UPDATE tickets SET ';
-    const params = [];
-    const updates = [];
+    // Start transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    if (status) {
-      updates.push(`status = $${params.length + 1}`);
-      params.push(status);
-      if (status === 'resolved') {
-        updates.push(`resolved_at = CURRENT_TIMESTAMP`);
+      let query = 'UPDATE tickets SET ';
+      const params = [];
+      const updates = [];
+
+      if (status) {
+        updates.push(`status = $${params.length + 1}`);
+        params.push(status);
+        if (status === 'resolved') {
+          updates.push(`resolved_at = CURRENT_TIMESTAMP`);
+        }
       }
+
+      if (assigned_to !== undefined) {
+        updates.push(`assigned_to = $${params.length + 1}`);
+        params.push(assigned_to);
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: 'No updates provided' });
+      }
+
+      query += updates.join(', ');
+      query += `, updated_at = CURRENT_TIMESTAMP WHERE id = $${params.length + 1}`;
+      params.push(id);
+      query += ' RETURNING *';
+
+      const result = await client.query(query, params);
+
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Ticket not found' });
+      }
+
+      // Add comment if provided
+      if (comment) {
+        await client.query(
+          'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
+          [id, req.user.id, comment]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.json(result.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
-
-    if (assigned_to) {
-      updates.push(`assigned_to = $${params.length + 1}`);
-      params.push(assigned_to);
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({ error: 'No updates provided' });
-    }
-
-    query += updates.join(', ');
-    query += `, updated_at = CURRENT_TIMESTAMP WHERE id = $${params.length + 1}`;
-    params.push(id);
-    query += ' RETURNING *';
-
-    const result = await pool.query(query, params);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Ticket not found' });
-    }
-
-    res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
@@ -10,16 +10,11 @@ function TicketDetail({ user }) {
   const [error, setError] = useState('');
   const [newComment, setNewComment] = useState('');
   const [engineers, setEngineers] = useState([]);
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [statusUpdate, setStatusUpdate] = useState({ status: '', comment: '' });
   const token = localStorage.getItem('token');
 
-  useEffect(() => {
-    fetchTicket();
-    if (user.role === 'engineer') {
-      fetchEngineers();
-    }
-  }, [id]);
-
-  const fetchTicket = async () => {
+  const fetchTicket = useCallback(async () => {
     try {
       const response = await axios.get(`/api/tickets/${id}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -30,9 +25,9 @@ function TicketDetail({ user }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, token]);
 
-  const fetchEngineers = async () => {
+  const fetchEngineers = useCallback(async () => {
     try {
       const response = await axios.get('/api/users/engineers/list', {
         headers: { Authorization: `Bearer ${token}` }
@@ -41,7 +36,14 @@ function TicketDetail({ user }) {
     } catch (err) {
       console.error('Failed to load engineers');
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    fetchTicket();
+    if (user.role === 'engineer') {
+      fetchEngineers();
+    }
+  }, [id, user.role, fetchTicket, fetchEngineers]);
 
   const handleAddComment = async (e) => {
     e.preventDefault();
@@ -70,7 +72,29 @@ function TicketDetail({ user }) {
       setError('Failed to update ticket');
     }
   };
+  const handleStatusChange = (newStatus) => {
+    if (newStatus !== ticket.status) {
+      setStatusUpdate({ status: newStatus, comment: '' });
+      setShowStatusModal(true);
+    }
+  };
 
+  const handleStatusUpdateSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.patch(`/api/tickets/${id}`, {
+        status: statusUpdate.status,
+        comment: statusUpdate.comment
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setShowStatusModal(false);
+      setStatusUpdate({ status: '', comment: '' });
+      fetchTicket();
+    } catch (err) {
+      setError('Failed to update ticket status');
+    }
+  };
   if (loading) return <div className="container"><p>Loading...</p></div>;
   if (error) return <div className="container"><div className="error">{error}</div></div>;
   if (!ticket) return <div className="container"><p>Ticket not found</p></div>;
@@ -141,8 +165,8 @@ function TicketDetail({ user }) {
               <div className="form-group">
                 <label>Update Status</label>
                 <select
-                  defaultValue={ticket.status}
-                  onChange={(e) => handleUpdateTicket(e.target.value, null)}
+                  value={ticket.status}
+                  onChange={(e) => handleStatusChange(e.target.value)}
                 >
                   <option value="open">Open</option>
                   <option value="in_progress">In Progress</option>
@@ -206,6 +230,51 @@ function TicketDetail({ user }) {
           </form>
         </div>
       </div>
+
+      {/* Status Update Modal */}
+      {showStatusModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            padding: '2rem',
+            borderRadius: '8px',
+            width: '90%',
+            maxWidth: '500px'
+          }}>
+            <h3>Update Ticket Status</h3>
+            <p>Changing status to: <strong>{statusUpdate.status.replace('_', ' ').toUpperCase()}</strong></p>
+            <form onSubmit={handleStatusUpdateSubmit}>
+              <div className="form-group">
+                <label>Comment (Required)</label>
+                <textarea
+                  rows="4"
+                  value={statusUpdate.comment}
+                  onChange={(e) => setStatusUpdate({...statusUpdate, comment: e.target.value})}
+                  placeholder="Please provide a comment explaining the status change..."
+                  required
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="button" onClick={() => setShowStatusModal(false)} style={{ background: '#6c757d' }}>
+                  Cancel
+                </button>
+                <button type="submit">Update Status</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
