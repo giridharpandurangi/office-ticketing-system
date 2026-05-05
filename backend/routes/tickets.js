@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { pool } = require('../db/init');
-const { authMiddleware, engineerOnly } = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 const { sendEmail } = require('../utils/email');
 
 const router = express.Router();
@@ -24,7 +24,6 @@ const storage = multer.diskStorage({
   }
 });
 
-// Fix #10: Proper MIME type allowlist instead of regex that misses application/pdf etc.
 const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/jpg',
@@ -40,11 +39,10 @@ const ALLOWED_EXTENSIONS = /\.(jpeg|jpg|png|gif|pdf|doc|docx|txt)$/i;
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const validExt = ALLOWED_EXTENSIONS.test(path.extname(file.originalname));
     const validMime = ALLOWED_MIME_TYPES.has(file.mimetype);
-
     if (validExt && validMime) {
       return cb(null, true);
     } else {
@@ -53,10 +51,11 @@ const upload = multer({
   }
 });
 
-// Get all tickets (with filters)
+// Get all tickets (with filters + search)
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const { status, assigned_to, category } = req.query;
+    const { status, assigned_to, category, search } = req.query;
+
     let query = `
       SELECT t.*, u.name as created_by_name, e.name as assigned_to_name, c.name as category_name,
              COALESCE(json_agg(a) FILTER (WHERE a.id IS NOT NULL), '[]') as attachments
@@ -68,9 +67,7 @@ router.get('/', authMiddleware, async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    const groupBy = ' GROUP BY t.id, u.name, e.name, c.name';
 
-    // Fix #1: SQL query bug — missing $ prefix on parameter placeholders
     if (status) {
       params.push(status);
       query += ` AND t.status = $${params.length}`;
@@ -86,13 +83,27 @@ router.get('/', authMiddleware, async (req, res) => {
       query += ` AND t.category_id = $${params.length}`;
     }
 
+    // Search: match ticket ID (exact), title (partial), or description (partial)
+    if (search && search.trim()) {
+      const term = search.trim();
+      // If the search term is a number, also match ticket ID exactly
+      if (/^\d+$/.test(term)) {
+        params.push(term);
+        params.push(`%${term}%`);
+        query += ` AND (t.id = $${params.length - 1} OR t.title ILIKE $${params.length} OR t.description ILIKE $${params.length})`;
+      } else {
+        params.push(`%${term}%`);
+        query += ` AND (t.title ILIKE $${params.length} OR t.description ILIKE $${params.length})`;
+      }
+    }
+
     // Regular users see only their own tickets
     if (req.user.role === 'user') {
       params.push(req.user.id);
       query += ` AND t.created_by = $${params.length}`;
     }
 
-    query += groupBy + ' ORDER BY t.created_at DESC';
+    query += ' GROUP BY t.id, u.name, e.name, c.name ORDER BY t.created_at DESC';
 
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -125,7 +136,6 @@ router.get('/:id', authMiddleware, async (req, res) => {
 
     const ticket = ticketResult.rows[0];
 
-    // Check access
     if (req.user.role === 'user' && ticket.created_by !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -182,7 +192,6 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Check if ticket exists and user has access
     const ticketResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
     if (ticketResult.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket not found' });
@@ -193,7 +202,6 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Save attachment info to database
     const result = await pool.query(
       `INSERT INTO attachments (ticket_id, filename, original_name, mime_type, size, path, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -207,8 +215,7 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
   }
 });
 
-// Update ticket status/assignment
-// Fix #11: Allow admins to update tickets, not just engineers
+// Update ticket status/assignment — engineers and admins only
 router.patch('/:id', authMiddleware, (req, res, next) => {
   if (req.user.role !== 'engineer' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied. Engineers and admins only.' });
@@ -216,7 +223,7 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
   next();
 }, [
   body('status').optional().isIn(['open', 'in_progress', 'resolved']),
-  body('assigned_to').optional().isInt(),
+  body('assigned_to').optional(),
   body('comment').if(body('status').exists()).notEmpty().withMessage('Comment is required when changing ticket status')
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -228,7 +235,6 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
     const { id } = req.params;
     const { status, assigned_to, comment } = req.body;
 
-    // Start transaction
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -264,7 +270,6 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
         return res.status(404).json({ error: 'Ticket not found' });
       }
 
-      // Add comment if provided
       if (comment) {
         await client.query(
           'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
@@ -275,6 +280,8 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
       await client.query('COMMIT');
 
       const updatedTicket = result.rows[0];
+
+      // Send email notification to ticket owner on status change
       if (status) {
         try {
           const ownerResult = await pool.query(
@@ -296,16 +303,10 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
               <p>You can review the ticket in the system for more details.</p>
               <p>Thank you.</p>
             `;
-
-            await sendEmail({
-              to: owner.notification_email,
-              subject,
-              text,
-              html,
-            });
+            await sendEmail({ to: owner.notification_email, subject, text, html });
           }
         } catch (emailError) {
-          console.error('Failed to send ticket status email notification:', emailError.message || emailError);
+          console.error('Failed to send email notification:', emailError.message || emailError);
         }
       }
 
@@ -334,7 +335,6 @@ router.post('/:id/comments', authMiddleware, [
     const { id } = req.params;
     const { content } = req.body;
 
-    // Verify ticket exists and user has access
     const ticketResult = await pool.query('SELECT created_by FROM tickets WHERE id = $1', [id]);
     if (ticketResult.rows.length === 0) {
       return res.status(404).json({ error: 'Ticket not found' });
@@ -344,9 +344,7 @@ router.post('/:id/comments', authMiddleware, [
     }
 
     const result = await pool.query(
-      `INSERT INTO comments (ticket_id, user_id, content)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
+      `INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3) RETURNING *`,
       [id, req.user.id, content]
     );
 

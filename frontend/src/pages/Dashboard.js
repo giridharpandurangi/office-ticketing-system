@@ -1,19 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 
-// Fix #20: Pagination constant
 const PAGE_SIZE = 10;
 
 function Dashboard({ user }) {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false); // Fix #13: prevent double-submit
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [filters, setFilters] = useState({ status: '', category: '' });
+  const [searchInput, setSearchInput] = useState('');   // what the user is typing
+  const [searchTerm, setSearchTerm] = useState('');     // debounced value sent to API
   const [categories, setCategories] = useState([]);
-  const [page, setPage] = useState(1); // Fix #20: pagination
+  const [page, setPage] = useState(1);
   const [newTicket, setNewTicket] = useState({
     title: '',
     description: '',
@@ -22,8 +23,25 @@ function Dashboard({ user }) {
     attachments: []
   });
   const navigate = useNavigate();
+  const debounceTimer = useRef(null);
 
-  // Fix #5: wrap in useCallback so useEffect deps are stable
+  // Debounce search input — wait 400ms after user stops typing before fetching
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setSearchTerm(value);
+      setPage(1);
+    }, 400);
+  };
+
+  const clearSearch = () => {
+    setSearchInput('');
+    setSearchTerm('');
+    setPage(1);
+  };
+
   const fetchCategories = useCallback(async () => {
     try {
       const response = await api.get('/api/categories');
@@ -39,17 +57,18 @@ function Dashboard({ user }) {
       const params = new URLSearchParams();
       if (filters.status) params.append('status', filters.status);
       if (filters.category) params.append('category', filters.category);
+      if (searchTerm.trim()) params.append('search', searchTerm.trim());
 
       const response = await api.get(`/api/tickets?${params}`);
       setTickets(response.data);
       setError('');
-      setPage(1); // reset to first page when filters change
+      setPage(1);
     } catch (err) {
       setError('Failed to load tickets');
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, searchTerm]);
 
   useEffect(() => {
     fetchTickets();
@@ -71,7 +90,7 @@ function Dashboard({ user }) {
   const handleCreateTicket = async (e) => {
     e.preventDefault();
     if (submitting) return;
-    setSubmitting(true); // Fix #13: disable button during submit
+    setSubmitting(true);
     setError('');
     try {
       const payload = {
@@ -79,16 +98,11 @@ function Dashboard({ user }) {
         description: newTicket.description,
         priority: newTicket.priority
       };
+      if (newTicket.category_id) payload.category_id = newTicket.category_id;
 
-      if (newTicket.category_id) {
-        payload.category_id = newTicket.category_id;
-      }
-
-      // Create ticket first
       const ticketResponse = await api.post('/api/tickets', payload);
       const ticketId = ticketResponse.data.id;
 
-      // Upload attachments sequentially if any
       for (const file of newTicket.attachments) {
         const formData = new FormData();
         formData.append('file', file);
@@ -107,12 +121,10 @@ function Dashboard({ user }) {
     }
   };
 
-  // Fix #20: Pagination logic
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
   const paginatedTickets = tickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  // Fix #15: Context-aware heading
   const heading = user.role === 'user' ? 'My Tickets' : 'All Tickets';
+  const hasActiveSearch = searchTerm.trim().length > 0;
 
   return (
     <div className="container">
@@ -167,9 +179,7 @@ function Dashboard({ user }) {
               >
                 <option value="">Select Category</option>
                 {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
+                  <option key={category.id} value={category.id}>{category.name}</option>
                 ))}
               </select>
             </div>
@@ -202,7 +212,6 @@ function Dashboard({ user }) {
               )}
             </div>
             <div style={{ display: 'flex', gap: '1rem' }}>
-              {/* Fix #13: Disable submit button while submitting */}
               <button type="submit" disabled={submitting}>
                 {submitting ? 'Creating...' : 'Create Ticket'}
               </button>
@@ -214,7 +223,23 @@ function Dashboard({ user }) {
         </div>
       )}
 
-      {/* Fix #14: Added category filter to the UI */}
+      {/* Search bar */}
+      <div className="search-bar">
+        <div className="search-input-wrap">
+          <span className="search-icon">🔍</span>
+          <input
+            type="text"
+            placeholder="Search by ticket ID, title or description…"
+            value={searchInput}
+            onChange={handleSearchChange}
+          />
+          {searchInput && (
+            <button className="search-clear" onClick={clearSearch} title="Clear search">✕</button>
+          )}
+        </div>
+      </div>
+
+      {/* Filters */}
       <div className="filters">
         <select
           value={filters.status}
@@ -240,10 +265,20 @@ function Dashboard({ user }) {
         <p>Loading tickets...</p>
       ) : tickets.length === 0 ? (
         <div className="empty-state">
-          <p>No tickets found{filters.status || filters.category ? ' for the selected filters' : ''}.</p>
+          {hasActiveSearch
+            ? <p>No tickets found for "<strong>{searchTerm}</strong>".</p>
+            : <p>No tickets found{filters.status || filters.category ? ' for the selected filters' : ''}.</p>
+          }
         </div>
       ) : (
         <>
+          {/* Result count when searching */}
+          {hasActiveSearch && (
+            <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+              {tickets.length} result{tickets.length !== 1 ? 's' : ''} for "<strong>{searchTerm}</strong>"
+            </p>
+          )}
+
           <div>
             {paginatedTickets.map((ticket) => (
               <div
@@ -254,7 +289,6 @@ function Dashboard({ user }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <h3>#{ticket.id} — {ticket.title}</h3>
-                    {/* Fix #12: Only append ellipsis if description is actually truncated */}
                     <p className="text-muted">
                       {ticket.description.length > 100
                         ? ticket.description.substring(0, 100) + '…'
@@ -277,7 +311,6 @@ function Dashboard({ user }) {
             ))}
           </div>
 
-          {/* Fix #20: Pagination controls */}
           {totalPages > 1 && (
             <div className="pagination">
               <button onClick={() => setPage(p => p - 1)} disabled={page === 1}>← Prev</button>
