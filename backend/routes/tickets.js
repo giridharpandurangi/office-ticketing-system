@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { pool } = require('../db/init');
 const { authMiddleware, engineerOnly } = require('../middleware/auth');
+const { sendEmail } = require('../utils/email');
 
 const router = express.Router();
 
@@ -254,7 +255,41 @@ router.patch('/:id', authMiddleware, engineerOnly, [
       }
 
       await client.query('COMMIT');
-      res.json(result.rows[0]);
+
+      const updatedTicket = result.rows[0];
+      if (status) {
+        try {
+          const ownerResult = await pool.query(
+            'SELECT email, notification_email, name FROM users WHERE id = $1',
+            [updatedTicket.created_by]
+          );
+
+          if (ownerResult.rows.length > 0 && ownerResult.rows[0].notification_email) {
+            const owner = ownerResult.rows[0];
+            const friendlyStatus = status === 'resolved' ? 'Resolved' : status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const subject = `Ticket #${updatedTicket.id} status updated to ${friendlyStatus}`;
+            const text = `Hello ${owner.name || 'User'},\n\nYour ticket titled \"${updatedTicket.title}\" has been updated to \"${friendlyStatus}\".\n\nComment:\n${comment || 'No comment provided.'}\n\nYou can review the ticket in the system for more details.\n\nThank you.`;
+            const html = `
+              <p>Hello ${owner.name || 'User'},</p>
+              <p>Your ticket titled <strong>${updatedTicket.title}</strong> has been updated to <strong>${friendlyStatus}</strong>.</p>
+              <p><strong>Comment:</strong><br />${comment ? comment.replace(/\n/g, '<br />') : 'No comment provided.'}</p>
+              <p>You can review the ticket in the system for more details.</p>
+              <p>Thank you.</p>
+            `;
+
+            await sendEmail({
+              to: owner.notification_email,
+              subject,
+              text,
+              html,
+            });
+          }
+        } catch (emailError) {
+          console.error('Failed to send ticket status email notification:', emailError.message || emailError);
+        }
+      }
+
+      res.json(updatedTicket);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

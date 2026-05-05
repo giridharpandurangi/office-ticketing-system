@@ -80,6 +80,11 @@ const initializeDatabase = async () => {
       ON CONFLICT (name) DO NOTHING
     `);
 
+    // Add notification_email column if it doesn't exist (migration)
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(255)
+    `);
+
     console.log('Database tables initialized successfully');
   } catch (err) {
     console.error('Error initializing database:', err);

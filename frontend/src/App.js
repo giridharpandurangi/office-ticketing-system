@@ -5,6 +5,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import TicketDetail from './pages/TicketDetail';
 import AdminPanel from './pages/AdminPanel';
+import Profile from './pages/Profile';
 import './App.css';
 
 function App() {
@@ -37,6 +38,7 @@ function App() {
         <Route path="/" element={user ? <Dashboard user={user} /> : <Navigate to="/login" />} />
         <Route path="/tickets/:id" element={user ? <TicketDetail user={user} /> : <Navigate to="/login" />} />
         <Route path="/admin" element={user && user.role === 'admin' ? <AdminPanel /> : <Navigate to="/" />} />
+        <Route path="/profile" element={user ? <Profile user={user} setUser={setUser} /> : <Navigate to="/login" />} />
       </Routes>
     </Router>
   );
@@ -51,6 +53,7 @@ function Navbar({ user, onLogout }) {
         {user.role === 'admin' && (
           <a href="/admin" className="nav-link">Admin</a>
         )}
+        <a href="/profile" className="nav-link">Settings</a>
         <button onClick={onLogout} className="btn-logout">Logout</button>
       </div>
     </nav>

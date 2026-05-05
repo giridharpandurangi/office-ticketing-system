@@ -2,6 +2,7 @@ const express = require('express');
 const bcryptjs = require('bcryptjs');
 const { pool } = require('../db/init');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
+const { sendTestEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -39,6 +40,67 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Email already exists' });
     }
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Get current user's profile
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, email, name, role, notification_email, created_at FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update current user's notification email
+router.patch('/me/profile', authMiddleware, async (req, res) => {
+  try {
+    const { notification_email } = req.body;
+
+    if (!notification_email || !notification_email.trim()) {
+      return res.status(400).json({ error: 'Notification email is required' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(notification_email.trim())) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
+    const result = await pool.query(
+      'UPDATE users SET notification_email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, email, name, role, notification_email',
+      [notification_email.trim(), req.user.id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Send test email to current user's notification email
+router.post('/me/test-email', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT name, notification_email FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = result.rows[0];
+
+    if (!user || !user.notification_email) {
+      return res.status(400).json({ error: 'No notification email set. Save one first.' });
+    }
+
+    await sendTestEmail(user.notification_email, user.name);
+    res.json({ message: `Test email sent to ${user.notification_email}` });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to send email: ${err.message}` });
   }
 });
 
