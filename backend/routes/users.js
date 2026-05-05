@@ -188,6 +188,17 @@ router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Block deletion if user has created tickets — ticket history must be preserved
+    const ticketCount = await pool.query(
+      'SELECT COUNT(*) FROM tickets WHERE created_by = $1',
+      [id]
+    );
+    if (parseInt(ticketCount.rows[0].count) > 0) {
+      return res.status(400).json({
+        error: `Cannot delete "${userResult.rows[0].name}" — they have ${ticketCount.rows[0].count} ticket(s) in the system. Resolve or reassign their tickets first, or consider changing their role to restrict access instead.`
+      });
+    }
+
     // Unassign any tickets assigned to this user before deleting
     await pool.query(
       'UPDATE tickets SET assigned_to = NULL WHERE assigned_to = $1',

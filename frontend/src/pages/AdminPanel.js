@@ -309,8 +309,9 @@ function AdminPanel() {
                 This cannot be undone. Their tickets will remain but become unassigned.
               </span>
             </p>
+            {error && <div className="error" style={{ margin: '1rem 0' }}>{error}</div>}
             <div className="confirm-actions">
-              <button onClick={() => setPendingDelete(null)} style={{ background: '#6c757d' }}>
+              <button onClick={() => { setPendingDelete(null); setError(''); }} style={{ background: '#6c757d' }}>
                 Cancel
               </button>
               <button
