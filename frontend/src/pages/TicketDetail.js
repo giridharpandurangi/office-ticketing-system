@@ -112,7 +112,7 @@ function TicketDetail({ user }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h1>#{ticket.id} — {ticket.title}</h1>
-            <p className="text-muted">Created by {ticket.created_by_name}</p>
+            <p className="text-muted">Created by {ticket.created_by_name || 'Deleted user'}</p>
           </div>
           <div style={{ textAlign: 'right' }}>
             <span className={`badge badge-${ticket.status}`}>
@@ -221,7 +221,7 @@ function TicketDetail({ user }) {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <strong>{comment.user_name}</strong>
+                    <strong>{comment.user_name || 'Deleted user'}</strong>
                     <span className="text-muted">{new Date(comment.created_at).toLocaleString()}</span>
                   </div>
                   <p style={{ whiteSpace: 'pre-wrap' }}>{comment.content}</p>

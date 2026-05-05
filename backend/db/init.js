@@ -85,6 +85,10 @@ const initializeDatabase = async () => {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(255)
     `);
 
+    // Allow created_by and comments.user_id to be NULL so deleted users don't break history
+    await pool.query(`ALTER TABLE tickets ALTER COLUMN created_by DROP NOT NULL`);
+    await pool.query(`ALTER TABLE comments ALTER COLUMN user_id DROP NOT NULL`);
+
     console.log('Database tables initialized successfully');
   } catch (err) {
     console.error('Error initializing database:', err);

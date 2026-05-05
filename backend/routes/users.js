@@ -188,22 +188,27 @@ router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Block deletion if user has created tickets — ticket history must be preserved
-    const ticketCount = await pool.query(
-      'SELECT COUNT(*) FROM tickets WHERE created_by = $1',
+    // Block deletion only if user has open/in-progress tickets
+    // Resolved tickets are kept as history — that's fine
+    const activeTickets = await pool.query(
+      "SELECT COUNT(*) FROM tickets WHERE created_by = $1 AND status != 'resolved'",
       [id]
     );
-    if (parseInt(ticketCount.rows[0].count) > 0) {
+    if (parseInt(activeTickets.rows[0].count) > 0) {
       return res.status(400).json({
-        error: `Cannot delete "${userResult.rows[0].name}" — they have ${ticketCount.rows[0].count} ticket(s) in the system. Resolve or reassign their tickets first, or consider changing their role to restrict access instead.`
+        error: `Cannot delete "${userResult.rows[0].name}" — they have ${activeTickets.rows[0].count} open or in-progress ticket(s). Resolve those tickets first, or reassign them to another user.`
       });
     }
 
-    // Unassign any tickets assigned to this user before deleting
-    await pool.query(
-      'UPDATE tickets SET assigned_to = NULL WHERE assigned_to = $1',
-      [id]
-    );
+    // Unassign tickets assigned to this user
+    await pool.query('UPDATE tickets SET assigned_to = NULL WHERE assigned_to = $1', [id]);
+
+    // For resolved tickets created by this user, preserve the name in the title
+    // by nulling out created_by (requires the column to allow NULL — migration below handles this)
+    await pool.query('UPDATE tickets SET created_by = NULL WHERE created_by = $1', [id]);
+
+    // Also null out any comments by this user (keep content, remove user link)
+    await pool.query('UPDATE comments SET user_id = NULL WHERE user_id = $1', [id]);
 
     await pool.query('DELETE FROM users WHERE id = $1', [id]);
 

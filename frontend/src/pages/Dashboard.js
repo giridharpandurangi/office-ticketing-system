@@ -303,7 +303,7 @@ function Dashboard({ user }) {
                       <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
                     </div>
                     <p className="text-muted" style={{ marginTop: '0.25rem' }}>
-                      {ticket.category_name || 'Uncategorized'} · {ticket.created_by_name}
+                      {ticket.category_name || 'Uncategorized'} · {ticket.created_by_name || 'Deleted user'}
                     </p>
                   </div>
                 </div>
