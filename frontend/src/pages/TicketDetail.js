@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api/axios';
 
 function TicketDetail({ user }) {
   const { id } = useParams();
@@ -9,69 +9,67 @@ function TicketDetail({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [newComment, setNewComment] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false); // Fix #13
   const [engineers, setEngineers] = useState([]);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [statusUpdate, setStatusUpdate] = useState({ status: '', comment: '' });
-  const token = localStorage.getItem('token');
+  const [submittingStatus, setSubmittingStatus] = useState(false); // Fix #13
 
   const fetchTicket = useCallback(async () => {
     try {
-      const response = await axios.get(`/api/tickets/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/api/tickets/${id}`);
       setTicket(response.data);
     } catch (err) {
       setError('Ticket not found or access denied');
     } finally {
       setLoading(false);
     }
-  }, [id, token]);
+  }, [id]);
 
   const fetchEngineers = useCallback(async () => {
     try {
-      const response = await axios.get('/api/users/engineers/list', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get('/api/users/engineers/list');
       setEngineers(response.data);
     } catch (err) {
       console.error('Failed to load engineers');
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     fetchTicket();
-    if (user.role === 'engineer') {
+    // Fix #11: Admins can also manage tickets
+    if (user.role === 'engineer' || user.role === 'admin') {
       fetchEngineers();
     }
   }, [id, user.role, fetchTicket, fetchEngineers]);
 
   const handleAddComment = async (e) => {
     e.preventDefault();
+    if (submittingComment) return;
+    setSubmittingComment(true);
     try {
-      await axios.post(`/api/tickets/${id}/comments`, { content: newComment }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.post(`/api/tickets/${id}/comments`, { content: newComment });
       setNewComment('');
       fetchTicket();
     } catch (err) {
       setError('Failed to add comment');
+    } finally {
+      setSubmittingComment(false);
     }
   };
 
-  const handleUpdateTicket = async (status, assignedTo) => {
+  // Fix #3: Assignment-only update — no status means no comment required
+  const handleAssignTicket = async (assignedTo) => {
     try {
-      const updateData = {};
-      if (status) updateData.status = status;
-      if (assignedTo) updateData.assigned_to = assignedTo;
-
-      await axios.patch(`/api/tickets/${id}`, updateData, {
-        headers: { Authorization: `Bearer ${token}` }
+      await api.patch(`/api/tickets/${id}`, {
+        assigned_to: assignedTo === '' ? null : parseInt(assignedTo, 10)
       });
       fetchTicket();
     } catch (err) {
-      setError('Failed to update ticket');
+      setError('Failed to assign ticket');
     }
   };
+
   const handleStatusChange = (newStatus) => {
     if (newStatus !== ticket.status) {
       setStatusUpdate({ status: newStatus, comment: '' });
@@ -81,44 +79,53 @@ function TicketDetail({ user }) {
 
   const handleStatusUpdateSubmit = async (e) => {
     e.preventDefault();
+    if (submittingStatus) return;
+    setSubmittingStatus(true);
     try {
-      await axios.patch(`/api/tickets/${id}`, {
+      await api.patch(`/api/tickets/${id}`, {
         status: statusUpdate.status,
         comment: statusUpdate.comment
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
       });
       setShowStatusModal(false);
       setStatusUpdate({ status: '', comment: '' });
       fetchTicket();
     } catch (err) {
-      setError('Failed to update ticket status');
+      setError(err.response?.data?.error || 'Failed to update ticket status');
+    } finally {
+      setSubmittingStatus(false);
     }
   };
+
   if (loading) return <div className="container"><p>Loading...</p></div>;
-  if (error) return <div className="container"><div className="error">{error}</div></div>;
+  if (error && !ticket) return <div className="container"><div className="error">{error}</div></div>;
   if (!ticket) return <div className="container"><p>Ticket not found</p></div>;
+
+  const canManage = user.role === 'engineer' || user.role === 'admin';
 
   return (
     <div className="container">
       <button onClick={() => navigate('/')} style={{ marginBottom: '1rem' }}>← Back to Tickets</button>
 
+      {error && <div className="error" style={{ marginBottom: '1rem' }}>{error}</div>}
+
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
-            <h1>#{ticket.id} - {ticket.title}</h1>
+            <h1>#{ticket.id} — {ticket.title}</h1>
             <p className="text-muted">Created by {ticket.created_by_name}</p>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <span className={`badge badge-${ticket.status}`}>{ticket.status}</span>
+            <span className={`badge badge-${ticket.status}`}>
+              {ticket.status.replace('_', ' ')}
+            </span>
             <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
           </div>
         </div>
 
         <h3 style={{ marginTop: '1.5rem' }}>Description</h3>
-        <p>{ticket.description}</p>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{ticket.description}</p>
 
-        <div style={{ marginTop: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+        <div style={{ marginTop: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
           <div>
             <strong>Category:</strong> {ticket.category_name || 'N/A'}
           </div>
@@ -135,21 +142,25 @@ function TicketDetail({ user }) {
           )}
         </div>
 
+        {/* Fix #2: Use relative URL for attachments instead of hardcoded localhost:5200 */}
         {ticket.attachments && ticket.attachments.length > 0 && (
           <div style={{ marginTop: '1.5rem' }}>
             <h3>Attachments</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginTop: '0.75rem' }}>
               {ticket.attachments.map((attachment) => (
-                <div key={attachment.id} style={{ border: '1px solid #ddd', padding: '0.5rem', borderRadius: '4px' }}>
+                <div
+                  key={attachment.id}
+                  style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: '8px', background: '#f8f9fa' }}
+                >
                   <a
-                    href={`http://localhost:5200/uploads/${attachment.filename}`}
+                    href={`/uploads/${attachment.filename}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ textDecoration: 'none', color: '#3498db' }}
+                    style={{ textDecoration: 'none', color: '#667eea', fontWeight: 500 }}
                   >
-                    {attachment.original_name}
+                    📎 {attachment.original_name}
                   </a>
-                  <p className="text-muted" style={{ fontSize: '12px', margin: '0.25rem 0' }}>
+                  <p className="text-muted" style={{ fontSize: '12px', margin: '0.25rem 0 0' }}>
                     {(attachment.size / 1024).toFixed(1)} KB
                   </p>
                 </div>
@@ -158,11 +169,12 @@ function TicketDetail({ user }) {
           </div>
         )}
 
-        {user.role === 'engineer' && (
-          <div style={{ marginTop: '2rem', padding: '1rem', background: '#f8f9fa', borderRadius: '4px' }}>
-            <h3>Engineer Actions</h3>
-            <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-              <div className="form-group">
+        {/* Fix #11: Show engineer actions for both engineers and admins */}
+        {canManage && (
+          <div style={{ marginTop: '2rem', padding: '1.25rem', background: '#f8f9fa', borderRadius: '8px' }}>
+            <h3>Actions</h3>
+            <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>Update Status</label>
                 <select
                   value={ticket.status}
@@ -173,11 +185,12 @@ function TicketDetail({ user }) {
                   <option value="resolved">Resolved</option>
                 </select>
               </div>
-              <div className="form-group">
+              <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>Assign to</label>
+                {/* Fix #3: Separate handler for assignment — no comment required */}
                 <select
-                  defaultValue={ticket.assigned_to || ''}
-                  onChange={(e) => handleUpdateTicket(null, e.target.value)}
+                  value={ticket.assigned_to || ''}
+                  onChange={(e) => handleAssignTicket(e.target.value)}
                 >
                   <option value="">Unassigned</option>
                   {engineers.map((eng) => (
@@ -195,25 +208,28 @@ function TicketDetail({ user }) {
           <h3>Comments ({ticket.comments?.length || 0})</h3>
 
           {ticket.comments && ticket.comments.length > 0 ? (
-            <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ marginBottom: '1.5rem', marginTop: '1rem' }}>
               {ticket.comments.map((comment) => (
                 <div
                   key={comment.id}
                   style={{
                     background: '#f8f9fa',
                     padding: '1rem',
-                    borderRadius: '4px',
-                    marginBottom: '0.5rem'
+                    borderRadius: '8px',
+                    marginBottom: '0.75rem',
+                    borderLeft: '3px solid #667eea'
                   }}
                 >
-                  <strong>{comment.user_name}</strong>
-                  <p className="text-muted">{new Date(comment.created_at).toLocaleString()}</p>
-                  <p>{comment.content}</p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <strong>{comment.user_name}</strong>
+                    <span className="text-muted">{new Date(comment.created_at).toLocaleString()}</span>
+                  </div>
+                  <p style={{ whiteSpace: 'pre-wrap' }}>{comment.content}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-muted">No comments yet</p>
+            <p className="text-muted" style={{ margin: '1rem 0' }}>No comments yet</p>
           )}
 
           <form onSubmit={handleAddComment}>
@@ -223,53 +239,50 @@ function TicketDetail({ user }) {
                 rows="3"
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Write a comment..."
                 required
               />
             </div>
-            <button type="submit">Add Comment</button>
+            {/* Fix #13: Disable while submitting */}
+            <button type="submit" disabled={submittingComment}>
+              {submittingComment ? 'Posting...' : 'Add Comment'}
+            </button>
           </form>
         </div>
       </div>
 
       {/* Status Update Modal */}
       {showStatusModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'white',
-            padding: '2rem',
-            borderRadius: '8px',
-            width: '90%',
-            maxWidth: '500px'
-          }}>
+        <div className="confirm-overlay">
+          <div className="confirm-box" style={{ maxWidth: '500px' }}>
             <h3>Update Ticket Status</h3>
-            <p>Changing status to: <strong>{statusUpdate.status.replace('_', ' ').toUpperCase()}</strong></p>
+            <p>
+              Changing status to:{' '}
+              <strong>{statusUpdate.status.replace('_', ' ').toUpperCase()}</strong>
+            </p>
             <form onSubmit={handleStatusUpdateSubmit}>
               <div className="form-group">
                 <label>Comment (Required)</label>
                 <textarea
                   rows="4"
                   value={statusUpdate.comment}
-                  onChange={(e) => setStatusUpdate({...statusUpdate, comment: e.target.value})}
+                  onChange={(e) => setStatusUpdate(prev => ({ ...prev, comment: e.target.value }))}
                   placeholder="Please provide a comment explaining the status change..."
                   required
                 />
               </div>
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                <button type="button" onClick={() => setShowStatusModal(false)} style={{ background: '#6c757d' }}>
+              <div className="confirm-actions">
+                <button
+                  type="button"
+                  onClick={() => setShowStatusModal(false)}
+                  style={{ background: '#6c757d' }}
+                >
                   Cancel
                 </button>
-                <button type="submit">Update Status</button>
+                {/* Fix #13: Disable while submitting */}
+                <button type="submit" disabled={submittingStatus}>
+                  {submittingStatus ? 'Updating...' : 'Update Status'}
+                </button>
               </div>
             </form>
           </div>

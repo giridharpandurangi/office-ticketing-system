@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api/axios';
 
 function Profile({ user }) {
   const [notificationEmail, setNotificationEmail] = useState('');
@@ -13,10 +13,7 @@ function Profile({ user }) {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const res = await axios.get('/api/users/me', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await api.get('/api/users/me');
         const email = res.data.notification_email || '';
         setNotificationEmail(email);
         setSavedEmail(email);
@@ -35,10 +32,7 @@ function Profile({ user }) {
     setError(null);
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch('/api/users/me/profile', { notification_email: notificationEmail }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.patch('/api/users/me/profile', { notification_email: notificationEmail });
       setSavedEmail(notificationEmail);
       setMessage('Notification email saved successfully.');
     } catch (err) {
@@ -53,10 +47,7 @@ function Profile({ user }) {
     setError(null);
     setSending(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await axios.post('/api/users/me/test-email', {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await api.post('/api/users/me/test-email', {});
       setMessage(res.data.message);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to send test email');

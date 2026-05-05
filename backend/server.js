@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const authRoutes = require('./routes/auth');
 const ticketsRoutes = require('./routes/tickets');
@@ -8,10 +10,40 @@ const usersRoutes = require('./routes/users');
 const categoriesRoutes = require('./routes/categories');
 const { initializeDatabase } = require('./db/init');
 
+// Validate JWT_SECRET exists on startup
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your_secret_key_here_change_in_production') {
+  console.error('FATAL ERROR: JWT_SECRET is not set or is using the default value.');
+  console.error('Please set a secure JWT_SECRET in your .env file.');
+  process.exit(1);
+}
+
 const app = express();
 
-// Middleware
+// Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// CORS — open for local office network use
 app.use(cors());
+
+// Rate limiting
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many authentication attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { error: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use(express.json());
 
 // Serve uploaded files
@@ -24,10 +56,10 @@ initializeDatabase().catch(err => {
 });
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/tickets', ticketsRoutes);
-app.use('/api/users', usersRoutes);
-app.use('/api/categories', categoriesRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/tickets', generalLimiter, ticketsRoutes);
+app.use('/api/users', generalLimiter, usersRoutes);
+app.use('/api/categories', generalLimiter, categoriesRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

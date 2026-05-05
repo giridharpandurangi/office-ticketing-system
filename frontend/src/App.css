@@ -231,6 +231,8 @@ button:disabled {
   color: white;
 }
 
+/* Fix #4: Match the actual status value 'in_progress' from database */
+.badge-in_progress,
 .badge-in-progress {
   background: linear-gradient(45deg, #ffd93d, #ffb347);
   color: #333;
@@ -338,3 +340,126 @@ button:disabled {
 .mt-2 { margin-top: 1rem; }
 .mb-1 { margin-bottom: 0.5rem; }
 .mb-2 { margin-bottom: 1rem; }
+
+/* ── Pagination ── */
+.pagination {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  align-items: center;
+  margin-top: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.pagination button {
+  padding: 0.5rem 1rem;
+  font-size: 14px;
+  min-width: 40px;
+}
+
+.pagination button.active {
+  background: linear-gradient(45deg, #764ba2, #667eea);
+  box-shadow: 0 4px 15px rgba(118, 75, 162, 0.4);
+}
+
+.pagination button:disabled {
+  background: #ddd;
+  color: #999;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* ── Empty state ── */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: #7f8c8d;
+}
+
+.empty-state p {
+  font-size: 16px;
+  margin-top: 0.5rem;
+}
+
+/* ── Confirmation dialog ── */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirm-box {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.confirm-box h3 {
+  margin-bottom: 0.75rem;
+}
+
+.confirm-box p {
+  color: #555;
+  margin-bottom: 1.5rem;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+}
+
+/* ── Mobile responsive ── */
+@media (max-width: 768px) {
+  .navbar {
+    padding: 0.75rem 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .navbar-menu {
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .container {
+    margin: 1rem auto;
+    padding: 0 0.75rem;
+  }
+
+  .card {
+    padding: 1.25rem;
+  }
+
+  .filters {
+    flex-direction: column;
+  }
+
+  .filters select {
+    width: 100%;
+  }
+
+  .table th,
+  .table td {
+    padding: 0.75rem 0.5rem;
+    font-size: 14px;
+  }
+
+  /* Hide less important columns on small screens */
+  .table .hide-mobile {
+    display: none;
+  }
+
+  .auth-form {
+    margin: 1.5rem auto;
+    padding: 1.5rem;
+  }
+}
