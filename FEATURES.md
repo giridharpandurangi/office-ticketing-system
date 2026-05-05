@@ -7,7 +7,7 @@ Track all planned features here. Check off each one after it's implemented and t
 ## Your List
 
 - [ ] Email to engineer when a ticket is assigned to them
-- [ ] User notification preferences — resolve only / any ticket change / disabled
+- [x] User notification preferences — resolve only / any ticket change / disabled
 - [ ] Admin can void (cancel) tickets
 - [ ] Admin can assign tickets (currently engineers only)
 - [ ] Import users from CSV or Excel (with auto-generated password option)

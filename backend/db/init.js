@@ -89,6 +89,12 @@ const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE tickets ALTER COLUMN created_by DROP NOT NULL`);
     await pool.query(`ALTER TABLE comments ALTER COLUMN user_id DROP NOT NULL`);
 
+    // Add notification_preference column — controls when emails are sent to the user
+    // Values: 'all' (any status change), 'resolved_only' (only when resolved), 'disabled' (never)
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preference VARCHAR(20) DEFAULT 'all'
+    `);
+
     console.log('Database tables initialized successfully');
   } catch (err) {
     console.error('Error initializing database:', err);

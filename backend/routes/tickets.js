@@ -25,12 +25,8 @@ const storage = multer.diskStorage({
 });
 
 const ALLOWED_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/gif',
-  'application/pdf',
-  'application/msword',
+  'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
+  'application/pdf', 'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'text/plain'
 ]);
@@ -38,16 +34,13 @@ const ALLOWED_MIME_TYPES = new Set([
 const ALLOWED_EXTENSIONS = /\.(jpeg|jpg|png|gif|pdf|doc|docx|txt)$/i;
 
 const upload = multer({
-  storage: storage,
+  storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const validExt = ALLOWED_EXTENSIONS.test(path.extname(file.originalname));
     const validMime = ALLOWED_MIME_TYPES.has(file.mimetype);
-    if (validExt && validMime) {
-      return cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Allowed: images, PDF, Word documents, text files.'));
-    }
+    if (validExt && validMime) return cb(null, true);
+    cb(new Error('Invalid file type. Allowed: images, PDF, Word documents, text files.'));
   }
 });
 
@@ -83,10 +76,8 @@ router.get('/', authMiddleware, async (req, res) => {
       query += ` AND t.category_id = $${params.length}`;
     }
 
-    // Search: match ticket ID (exact), title (partial), or description (partial)
     if (search && search.trim()) {
       const term = search.trim();
-      // If the search term is a number, also match ticket ID exactly
       if (/^\d+$/.test(term)) {
         params.push(term);
         params.push(`%${term}%`);
@@ -97,7 +88,6 @@ router.get('/', authMiddleware, async (req, res) => {
       }
     }
 
-    // Regular users see only their own tickets
     if (req.user.role === 'user') {
       params.push(req.user.id);
       query += ` AND t.created_by = $${params.length}`;
@@ -143,7 +133,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     const commentsResult = await pool.query(
       `SELECT c.*, u.name as user_name
        FROM comments c
-       JOIN users u ON c.user_id = u.id
+       LEFT JOIN users u ON c.user_id = u.id
        WHERE c.ticket_id = $1
        ORDER BY c.created_at ASC`,
       [id]
@@ -172,8 +162,7 @@ router.post('/', authMiddleware, [
 
     const result = await pool.query(
       `INSERT INTO tickets (title, description, priority, category_id, created_by)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [title, description, priority, category_id || null, req.user.id]
     );
 
@@ -188,14 +177,10 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
   try {
     const { id } = req.params;
 
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const ticketResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
-    if (ticketResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Ticket not found' });
-    }
+    if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
 
     const ticket = ticketResult.rows[0];
     if (req.user.role === 'user' && ticket.created_by !== req.user.id) {
@@ -204,8 +189,7 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
 
     const result = await pool.query(
       `INSERT INTO attachments (ticket_id, filename, original_name, mime_type, size, path, uploaded_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [id, req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.file.path, req.user.id]
     );
 
@@ -245,9 +229,7 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
       if (status) {
         params.push(status);
         updates.push(`status = $${params.length}`);
-        if (status === 'resolved') {
-          updates.push(`resolved_at = CURRENT_TIMESTAMP`);
-        }
+        if (status === 'resolved') updates.push(`resolved_at = CURRENT_TIMESTAMP`);
       }
 
       if (assigned_to !== undefined) {
@@ -281,29 +263,39 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
 
       const updatedTicket = result.rows[0];
 
-      // Send email notification to ticket owner on status change
-      if (status) {
+      // Send email notification respecting user's notification_preference
+      if (status && updatedTicket.created_by) {
         try {
           const ownerResult = await pool.query(
-            'SELECT email, notification_email, name FROM users WHERE id = $1',
+            'SELECT name, notification_email, notification_preference FROM users WHERE id = $1',
             [updatedTicket.created_by]
           );
 
-          if (ownerResult.rows.length > 0 && ownerResult.rows[0].notification_email) {
+          if (ownerResult.rows.length > 0) {
             const owner = ownerResult.rows[0];
-            const friendlyStatus = status === 'resolved'
-              ? 'Resolved'
-              : status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-            const subject = `Ticket #${updatedTicket.id} status updated to ${friendlyStatus}`;
-            const text = `Hello ${owner.name || 'User'},\n\nYour ticket titled "${updatedTicket.title}" has been updated to "${friendlyStatus}".\n\nComment:\n${comment || 'No comment provided.'}\n\nYou can review the ticket in the system for more details.\n\nThank you.`;
-            const html = `
-              <p>Hello ${owner.name || 'User'},</p>
-              <p>Your ticket titled <strong>${updatedTicket.title}</strong> has been updated to <strong>${friendlyStatus}</strong>.</p>
-              <p><strong>Comment:</strong><br />${comment ? comment.replace(/\n/g, '<br />') : 'No comment provided.'}</p>
-              <p>You can review the ticket in the system for more details.</p>
-              <p>Thank you.</p>
-            `;
-            await sendEmail({ to: owner.notification_email, subject, text, html });
+            const pref = owner.notification_preference || 'all';
+
+            // Check if we should send based on preference
+            const shouldSend =
+              owner.notification_email &&
+              pref !== 'disabled' &&
+              (pref === 'all' || (pref === 'resolved_only' && status === 'resolved'));
+
+            if (shouldSend) {
+              const friendlyStatus = status === 'resolved'
+                ? 'Resolved'
+                : status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+              const subject = `Ticket #${updatedTicket.id} status updated to ${friendlyStatus}`;
+              const text = `Hello ${owner.name || 'User'},\n\nYour ticket titled "${updatedTicket.title}" has been updated to "${friendlyStatus}".\n\nComment:\n${comment || 'No comment provided.'}\n\nYou can review the ticket in the system for more details.\n\nThank you.`;
+              const html = `
+                <p>Hello ${owner.name || 'User'},</p>
+                <p>Your ticket titled <strong>${updatedTicket.title}</strong> has been updated to <strong>${friendlyStatus}</strong>.</p>
+                <p><strong>Comment:</strong><br />${comment ? comment.replace(/\n/g, '<br />') : 'No comment provided.'}</p>
+                <p>You can review the ticket in the system for more details.</p>
+                <p>Thank you.</p>
+              `;
+              await sendEmail({ to: owner.notification_email, subject, text, html });
+            }
           }
         } catch (emailError) {
           console.error('Failed to send email notification:', emailError.message || emailError);
@@ -336,9 +328,8 @@ router.post('/:id/comments', authMiddleware, [
     const { content } = req.body;
 
     const ticketResult = await pool.query('SELECT created_by FROM tickets WHERE id = $1', [id]);
-    if (ticketResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Ticket not found' });
-    }
+    if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
+
     if (req.user.role === 'user' && ticketResult.rows[0].created_by !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }

@@ -47,7 +47,7 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, email, name, role, notification_email, created_at FROM users WHERE id = $1',
+      'SELECT id, email, name, role, notification_email, notification_preference, created_at FROM users WHERE id = $1',
       [req.user.id]
     );
     if (result.rows.length === 0) {
@@ -59,10 +59,10 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
-// Update current user's notification email
+// Update current user's notification settings
 router.patch('/me/profile', authMiddleware, async (req, res) => {
   try {
-    const { notification_email } = req.body;
+    const { notification_email, notification_preference } = req.body;
 
     if (!notification_email || !notification_email.trim()) {
       return res.status(400).json({ error: 'Notification email is required' });
@@ -73,9 +73,15 @@ router.patch('/me/profile', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Invalid email address' });
     }
 
+    const validPreferences = ['all', 'resolved_only', 'disabled'];
+    const pref = validPreferences.includes(notification_preference) ? notification_preference : 'all';
+
     const result = await pool.query(
-      'UPDATE users SET notification_email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, email, name, role, notification_email',
-      [notification_email.trim(), req.user.id]
+      `UPDATE users
+       SET notification_email = $1, notification_preference = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+       RETURNING id, email, name, role, notification_email, notification_preference`,
+      [notification_email.trim(), pref, req.user.id]
     );
 
     res.json(result.rows[0]);
