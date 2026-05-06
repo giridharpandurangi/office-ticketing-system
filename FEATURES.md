@@ -20,7 +20,7 @@ Track all planned features here. Check off each one after it's implemented and t
 - [x] Search — search tickets by title, description, or ticket ID
 - [x] SLA / due dates — expected resolution time per priority (e.g. high = 4hrs, medium = 1 day, low = 3 days), overdue tickets flagged visually
 - [x] "Waiting for Approval" status — for tickets blocked on external approvals (vendor payment, procurement, etc.) without exposing internal reasons to users
-- [ ] Ticket re-open — users can re-open a resolved ticket instead of creating a duplicate
+- [x] Ticket re-open — users can re-open a resolved ticket instead of creating a duplicate
 - [ ] Bulk actions — select multiple tickets and assign, close, or change status in one go
 
 ### User & Access

@@ -18,6 +18,9 @@ function TicketDetail({ user }) {
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [submittingVoid, setSubmittingVoid] = useState(false);
+  const [showReopenModal, setShowReopenModal] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [submittingReopen, setSubmittingReopen] = useState(false);
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -114,12 +117,31 @@ function TicketDetail({ user }) {
     }
   };
 
+  const handleReopenSubmit = async (e) => {
+    e.preventDefault();
+    if (submittingReopen) return;
+    setSubmittingReopen(true);
+    try {
+      await api.patch(`/api/tickets/${id}/reopen`, { reason: reopenReason });
+      setShowReopenModal(false);
+      setReopenReason('');
+      fetchTicket();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to re-open ticket');
+    } finally {
+      setSubmittingReopen(false);
+    }
+  };
+
   if (loading) return <div className="container"><p>Loading...</p></div>;
   if (error && !ticket) return <div className="container"><div className="error">{error}</div></div>;
   if (!ticket) return <div className="container"><p>Ticket not found</p></div>;
 
   const canManage = user.role === 'engineer' || user.role === 'admin';
   const isVoided = ticket.status === 'voided';
+  const isResolved = ticket.status === 'resolved';
+  const isOwner = ticket.created_by === user.id;
+  const canReopen = isResolved && (isOwner || canManage);
 
   return (
     <div className="container">
@@ -140,6 +162,32 @@ function TicketDetail({ user }) {
             <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
           </div>
         </div>
+
+        {/* Re-open banner for resolved tickets */}
+        {canReopen && (
+          <div style={{
+            marginTop: '1rem',
+            padding: '0.875rem 1rem',
+            background: 'rgba(102, 126, 234, 0.07)',
+            border: '1px solid rgba(102, 126, 234, 0.25)',
+            borderRadius: '8px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem'
+          }}>
+            <span style={{ fontSize: '14px', color: '#555' }}>
+              Issue not resolved? You can re-open this ticket.
+            </span>
+            <button
+              onClick={() => { setShowReopenModal(true); setReopenReason(''); }}
+              style={{ background: 'linear-gradient(45deg, #667eea, #764ba2)', fontSize: '13px', padding: '0.5rem 1rem' }}
+            >
+              Re-open Ticket
+            </button>
+          </div>
+        )}
 
         {/* Voided reason banner */}
         {isVoided && ticket.voided_reason && (
@@ -370,6 +418,43 @@ function TicketDetail({ user }) {
                   style={{ background: 'linear-gradient(45deg, #e74c3c, #c0392b)' }}
                 >
                   {submittingVoid ? 'Voiding...' : 'Void Ticket'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Re-open Ticket Modal */}
+      {showReopenModal && (
+        <div className="confirm-overlay">
+          <div className="confirm-box" style={{ maxWidth: '500px' }}>
+            <h3>Re-open Ticket</h3>
+            <p>
+              This will re-open ticket <strong>#{ticket.id}</strong> and set it back to <strong>Open</strong>.
+              <br />
+              <span style={{ fontSize: '13px', color: '#888' }}>
+                The SLA timer will reset from now.
+              </span>
+            </p>
+            <form onSubmit={handleReopenSubmit}>
+              <div className="form-group">
+                <label>Reason (Required)</label>
+                <textarea
+                  rows="3"
+                  value={reopenReason}
+                  onChange={(e) => setReopenReason(e.target.value)}
+                  placeholder="Describe why the issue is not resolved…"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="confirm-actions">
+                <button type="button" onClick={() => setShowReopenModal(false)} style={{ background: '#6c757d' }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={submittingReopen || !reopenReason.trim()}>
+                  {submittingReopen ? 'Re-opening...' : 'Re-open Ticket'}
                 </button>
               </div>
             </form>

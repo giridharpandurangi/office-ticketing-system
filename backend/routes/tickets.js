@@ -9,13 +9,14 @@ const { sendEmail } = require('../utils/email');
 
 const router = express.Router();
 
-// Configure multer for file uploads
+const SLA_HOURS = { high: 4, medium: 24, low: 72 };
+
+// ── Multer setup ─────────────────────────────────────────────────────────────
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
@@ -31,66 +32,69 @@ const ALLOWED_MIME_TYPES = new Set([
   'text/plain'
 ]);
 
-const ALLOWED_EXTENSIONS = /\.(jpeg|jpg|png|gif|pdf|doc|docx|txt)$/i;
-
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const validExt = ALLOWED_EXTENSIONS.test(path.extname(file.originalname));
+    const validExt = /\.(jpeg|jpg|png|gif|pdf|doc|docx|txt)$/i.test(path.extname(file.originalname));
     const validMime = ALLOWED_MIME_TYPES.has(file.mimetype);
     if (validExt && validMime) return cb(null, true);
     cb(new Error('Invalid file type. Allowed: images, PDF, Word documents, text files.'));
   }
 });
 
-// Get all tickets (with filters + search)
+// ── Helper: build parameterised placeholder ──────────────────────────────────
+// Avoids the template-literal $ interpretation issue
+function p(n) { return '$' + n; }
+
+// ── GET /api/tickets ─────────────────────────────────────────────────────────
+
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { status, assigned_to, category, search } = req.query;
 
-    let query = `
-      SELECT t.*, u.name as created_by_name, e.name as assigned_to_name, c.name as category_name,
-             COALESCE(json_agg(a) FILTER (WHERE a.id IS NOT NULL), '[]') as attachments
-      FROM tickets t
-      LEFT JOIN users u ON t.created_by = u.id
-      LEFT JOIN users e ON t.assigned_to = e.id
-      LEFT JOIN categories c ON t.category_id = c.id
-      LEFT JOIN attachments a ON t.id = a.ticket_id
-      WHERE 1=1
-    `;
+    let query = [
+      'SELECT t.*, u.name as created_by_name, e.name as assigned_to_name, c.name as category_name,',
+      "COALESCE(json_agg(a) FILTER (WHERE a.id IS NOT NULL), '[]') as attachments",
+      'FROM tickets t',
+      'LEFT JOIN users u ON t.created_by = u.id',
+      'LEFT JOIN users e ON t.assigned_to = e.id',
+      'LEFT JOIN categories c ON t.category_id = c.id',
+      'LEFT JOIN attachments a ON t.id = a.ticket_id',
+      'WHERE 1=1'
+    ].join(' ');
+
     const params = [];
 
     if (status) {
       params.push(status);
-      query += ` AND t.status = $${params.length}`;
+      query += ' AND t.status = ' + p(params.length);
     }
-
     if (assigned_to) {
       params.push(assigned_to);
-      query += ` AND t.assigned_to = $${params.length}`;
+      query += ' AND t.assigned_to = ' + p(params.length);
     }
-
     if (category) {
       params.push(category);
-      query += ` AND t.category_id = $${params.length}`;
+      query += ' AND t.category_id = ' + p(params.length);
     }
-
     if (search && search.trim()) {
       const term = search.trim();
       if (/^\d+$/.test(term)) {
         params.push(term);
-        params.push(`%${term}%`);
-        query += ` AND (t.id = $${params.length - 1} OR t.title ILIKE $${params.length} OR t.description ILIKE $${params.length})`;
+        const n1 = params.length;
+        params.push('%' + term + '%');
+        const n2 = params.length;
+        query += ' AND (t.id = ' + p(n1) + ' OR t.title ILIKE ' + p(n2) + ' OR t.description ILIKE ' + p(n2) + ')';
       } else {
-        params.push(`%${term}%`);
-        query += ` AND (t.title ILIKE $${params.length} OR t.description ILIKE $${params.length})`;
+        params.push('%' + term + '%');
+        const n = params.length;
+        query += ' AND (t.title ILIKE ' + p(n) + ' OR t.description ILIKE ' + p(n) + ')';
       }
     }
-
     if (req.user.role === 'user') {
       params.push(req.user.id);
-      query += ` AND t.created_by = $${params.length}`;
+      query += ' AND t.created_by = ' + p(params.length);
     }
 
     query += ' GROUP BY t.id, u.name, e.name, c.name ORDER BY t.created_at DESC';
@@ -102,21 +106,24 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Get single ticket with comments
+// ── GET /api/tickets/:id ─────────────────────────────────────────────────────
+
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
     const ticketResult = await pool.query(
-      `SELECT t.*, u.name as created_by_name, e.name as assigned_to_name, c.name as category_name,
-              COALESCE(json_agg(a) FILTER (WHERE a.id IS NOT NULL), '[]') as attachments
-       FROM tickets t
-       LEFT JOIN users u ON t.created_by = u.id
-       LEFT JOIN users e ON t.assigned_to = e.id
-       LEFT JOIN categories c ON t.category_id = c.id
-       LEFT JOIN attachments a ON t.id = a.ticket_id
-       WHERE t.id = $1
-       GROUP BY t.id, u.name, e.name, c.name`,
+      [
+        'SELECT t.*, u.name as created_by_name, e.name as assigned_to_name, c.name as category_name,',
+        "COALESCE(json_agg(a) FILTER (WHERE a.id IS NOT NULL), '[]') as attachments",
+        'FROM tickets t',
+        'LEFT JOIN users u ON t.created_by = u.id',
+        'LEFT JOIN users e ON t.assigned_to = e.id',
+        'LEFT JOIN categories c ON t.category_id = c.id',
+        'LEFT JOIN attachments a ON t.id = a.ticket_id',
+        'WHERE t.id = $1',
+        'GROUP BY t.id, u.name, e.name, c.name'
+      ].join(' '),
       [id]
     );
 
@@ -131,11 +138,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
     }
 
     const commentsResult = await pool.query(
-      `SELECT c.*, u.name as user_name
-       FROM comments c
-       LEFT JOIN users u ON c.user_id = u.id
-       WHERE c.ticket_id = $1
-       ORDER BY c.created_at ASC`,
+      'SELECT c.*, u.name as user_name FROM comments c LEFT JOIN users u ON c.user_id = u.id WHERE c.ticket_id = $1 ORDER BY c.created_at ASC',
       [id]
     );
 
@@ -145,7 +148,8 @@ router.get('/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Create ticket
+// ── POST /api/tickets ────────────────────────────────────────────────────────
+
 router.post('/', authMiddleware, [
   body('title').notEmpty().withMessage('Title is required'),
   body('description').notEmpty().withMessage('Description is required'),
@@ -153,20 +157,14 @@ router.post('/', authMiddleware, [
   body('category_id').optional().isInt()
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   try {
     const { title, description, priority, category_id } = req.body;
-
-    // SLA due times by priority
-    const SLA_HOURS = { high: 4, medium: 24, low: 72 };
     const slaHours = SLA_HOURS[priority] || 24;
 
     const result = await pool.query(
-      `INSERT INTO tickets (title, description, priority, category_id, created_by, due_at)
-       VALUES ($1, $2, $3, $4, $5, NOW() + ($6 || ' hours')::INTERVAL) RETURNING *`,
+      "INSERT INTO tickets (title, description, priority, category_id, created_by, due_at) VALUES ($1, $2, $3, $4, $5, NOW() + ($6 || ' hours')::INTERVAL) RETURNING *",
       [title, description, priority, category_id || null, req.user.id, slaHours]
     );
 
@@ -176,11 +174,11 @@ router.post('/', authMiddleware, [
   }
 });
 
-// Upload attachment to ticket
+// ── POST /api/tickets/:id/attachments ────────────────────────────────────────
+
 router.post('/:id/attachments', authMiddleware, upload.single('file'), async (req, res) => {
   try {
     const { id } = req.params;
-
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const ticketResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
@@ -192,8 +190,7 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
     }
 
     const result = await pool.query(
-      `INSERT INTO attachments (ticket_id, filename, original_name, mime_type, size, path, uploaded_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      'INSERT INTO attachments (ticket_id, filename, original_name, mime_type, size, path, uploaded_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
       [id, req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.file.path, req.user.id]
     );
 
@@ -203,40 +200,43 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
   }
 });
 
-// Void ticket — admin only
-router.patch('/:id/void', authMiddleware, (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied. Admins only.' });
-  }
-  next();
-}, [
-  body('reason').notEmpty().withMessage('A reason is required to void a ticket')
+// ── PATCH /api/tickets/:id/reopen ────────────────────────────────────────────
+// Users can reopen their own resolved tickets; engineers/admins can reopen any
+
+router.patch('/:id/reopen', authMiddleware, [
+  body('reason').notEmpty().withMessage('Please describe why you are re-opening this ticket')
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   try {
     const { id } = req.params;
     const { reason } = req.body;
 
-    const result = await pool.query(
-      `UPDATE tickets
-       SET status = 'voided', voided_reason = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND status != 'voided'
-       RETURNING *`,
-      [reason, id]
-    );
+    const ticketResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
+    if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Ticket not found or already voided' });
+    const ticket = ticketResult.rows[0];
+
+    if (ticket.status !== 'resolved') {
+      return res.status(400).json({ error: 'Only resolved tickets can be re-opened.' });
+    }
+    if (req.user.role === 'user' && ticket.created_by !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
     }
 
-    // Add a system comment recording the void
+    // Reset SLA from now
+    const slaHours = SLA_HOURS[ticket.priority] || 24;
+
+    const result = await pool.query(
+      "UPDATE tickets SET status = 'open', resolved_at = NULL, due_at = NOW() + ($1 || ' hours')::INTERVAL, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *",
+      [slaHours, id]
+    );
+
+    // Record the reopen as a comment
     await pool.query(
       'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
-      [id, req.user.id, `Ticket voided. Reason: ${reason}`]
+      [id, req.user.id, 'Ticket re-opened. Reason: ' + reason]
     );
 
     res.json(result.rows[0]);
@@ -245,7 +245,44 @@ router.patch('/:id/void', authMiddleware, (req, res, next) => {
   }
 });
 
-// Update ticket status/assignment — engineers and admins only
+// ── PATCH /api/tickets/:id/void ──────────────────────────────────────────────
+
+router.patch('/:id/void', authMiddleware, (req, res, next) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied. Admins only.' });
+  next();
+}, [
+  body('reason').notEmpty().withMessage('A reason is required to void a ticket')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const result = await pool.query(
+      "UPDATE tickets SET status = 'voided', voided_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status != 'voided' RETURNING *",
+      [reason, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket not found or already voided' });
+    }
+
+    await pool.query(
+      'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
+      [id, req.user.id, 'Ticket voided. Reason: ' + reason]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /api/tickets/:id ───────────────────────────────────────────────────
+// Engineers and admins only
+
 router.patch('/:id', authMiddleware, (req, res, next) => {
   if (req.user.role !== 'engineer' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Access denied. Engineers and admins only.' });
@@ -257,9 +294,7 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
   body('comment').if(body('status').exists()).notEmpty().withMessage('Comment is required when changing ticket status')
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   try {
     const { id } = req.params;
@@ -269,11 +304,8 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
     try {
       await client.query('BEGIN');
 
-      // Prevent changes to voided tickets
       const current = await client.query('SELECT status FROM tickets WHERE id = $1', [id]);
-      if (current.rows.length === 0) {
-        return res.status(404).json({ error: 'Ticket not found' });
-      }
+      if (current.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
       if (current.rows[0].status === 'voided') {
         return res.status(400).json({ error: 'Cannot update a voided ticket.' });
       }
@@ -283,22 +315,18 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
 
       if (status) {
         params.push(status);
-        updates.push(`status = $${params.length}`);
-        if (status === 'resolved') updates.push(`resolved_at = CURRENT_TIMESTAMP`);
+        updates.push('status = ' + p(params.length));
+        if (status === 'resolved') updates.push('resolved_at = CURRENT_TIMESTAMP');
       }
-
       if (assigned_to !== undefined) {
         params.push(assigned_to || null);
-        updates.push(`assigned_to = $${params.length}`);
+        updates.push('assigned_to = ' + p(params.length));
       }
+      if (updates.length === 0) return res.status(400).json({ error: 'No updates provided' });
 
-      if (updates.length === 0) {
-        return res.status(400).json({ error: 'No updates provided' });
-      }
-
-      updates.push(`updated_at = CURRENT_TIMESTAMP`);
+      updates.push('updated_at = CURRENT_TIMESTAMP');
       params.push(id);
-      const query = `UPDATE tickets SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`;
+      const query = 'UPDATE tickets SET ' + updates.join(', ') + ' WHERE id = ' + p(params.length) + ' RETURNING *';
 
       const result = await client.query(query, params);
 
@@ -313,36 +341,27 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
 
       const updatedTicket = result.rows[0];
 
-      // Send email notification respecting user's notification_preference
+      // Email notification
       if (status && updatedTicket.created_by) {
         try {
           const ownerResult = await pool.query(
             'SELECT name, notification_email, notification_preference FROM users WHERE id = $1',
             [updatedTicket.created_by]
           );
-
           if (ownerResult.rows.length > 0) {
             const owner = ownerResult.rows[0];
             const pref = owner.notification_preference || 'all';
-
             const shouldSend =
               owner.notification_email &&
               pref !== 'disabled' &&
               (pref === 'all' || (pref === 'resolved_only' && status === 'resolved'));
 
             if (shouldSend) {
-              const friendlyStatus = status === 'resolved'
-                ? 'Resolved'
-                : status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-              const subject = `Ticket #${updatedTicket.id} status updated to ${friendlyStatus}`;
-              const text = `Hello ${owner.name || 'User'},\n\nYour ticket titled "${updatedTicket.title}" has been updated to "${friendlyStatus}".\n\nComment:\n${comment || 'No comment provided.'}\n\nYou can review the ticket in the system for more details.\n\nThank you.`;
-              const html = `
-                <p>Hello ${owner.name || 'User'},</p>
-                <p>Your ticket titled <strong>${updatedTicket.title}</strong> has been updated to <strong>${friendlyStatus}</strong>.</p>
-                <p><strong>Comment:</strong><br />${comment ? comment.replace(/\n/g, '<br />') : 'No comment provided.'}</p>
-                <p>You can review the ticket in the system for more details.</p>
-                <p>Thank you.</p>
-              `;
+              const friendlyStatus = status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              const subject = 'Ticket #' + updatedTicket.id + ' status updated to ' + friendlyStatus;
+              const commentText = comment || 'No comment provided.';
+              const text = 'Hello ' + (owner.name || 'User') + ',\n\nYour ticket titled "' + updatedTicket.title + '" has been updated to "' + friendlyStatus + '".\n\nComment:\n' + commentText + '\n\nThank you.';
+              const html = '<p>Hello ' + (owner.name || 'User') + ',</p><p>Your ticket titled <strong>' + updatedTicket.title + '</strong> has been updated to <strong>' + friendlyStatus + '</strong>.</p><p><strong>Comment:</strong><br />' + commentText.replace(/\n/g, '<br />') + '</p><p>Thank you.</p>';
               await sendEmail({ to: owner.notification_email, subject, text, html });
             }
           }
@@ -363,14 +382,13 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
   }
 });
 
-// Add comment
+// ── POST /api/tickets/:id/comments ───────────────────────────────────────────
+
 router.post('/:id/comments', authMiddleware, [
   body('content').notEmpty().withMessage('Comment content is required')
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   try {
     const { id } = req.params;
@@ -378,13 +396,12 @@ router.post('/:id/comments', authMiddleware, [
 
     const ticketResult = await pool.query('SELECT created_by, status FROM tickets WHERE id = $1', [id]);
     if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
-
     if (req.user.role === 'user' && ticketResult.rows[0].created_by !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     const result = await pool.query(
-      `INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3) RETURNING *`,
+      'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3) RETURNING *',
       [id, req.user.id, content]
     );
 
