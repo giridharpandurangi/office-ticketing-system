@@ -26,6 +26,7 @@ Track all planned features here. Check off each one after it's implemented and t
 ### User & Access
 - [x] Admin can reset user passwords
 - [x] Admin can delete users (tickets remain, assignments cleared)
+- [x] Change own password — from the profile/settings page
 - [ ] Deactivate users — admin can disable accounts without deleting them (e.g. when someone leaves)
 
 ### Visibility & Reporting

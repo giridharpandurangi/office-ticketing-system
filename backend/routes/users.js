@@ -90,7 +90,44 @@ router.patch('/me/profile', authMiddleware, async (req, res) => {
   }
 });
 
-// Send test email to current user's notification email
+// Change own password — requires current password to verify identity
+router.patch('/me/password', authMiddleware, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({ error: 'Current password and new password are required.' });
+    }
+    if (new_password.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+    }
+    if (current_password === new_password) {
+      return res.status(400).json({ error: 'New password must be different from your current password.' });
+    }
+
+    // Fetch current hashed password
+    const result = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    // Verify current password
+    const valid = await bcryptjs.compare(current_password, result.rows[0].password);
+    if (!valid) {
+      return res.status(400).json({ error: 'Current password is incorrect.' });
+    }
+
+    const hashedPassword = await bcryptjs.hash(new_password, 10);
+    await pool.query(
+      'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [hashedPassword, req.user.id]
+    );
+
+    res.json({ message: 'Password changed successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 router.post('/me/test-email', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(

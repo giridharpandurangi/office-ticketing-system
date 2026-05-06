@@ -29,6 +29,12 @@ function Profile({ user }) {
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
 
+  // Password change state
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMessage, setPwMessage] = useState(null);
+  const [pwError, setPwError] = useState(null);
+
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -75,6 +81,35 @@ function Profile({ user }) {
       setError(err.response?.data?.error || 'Failed to send test email');
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPwMessage(null);
+    setPwError(null);
+
+    if (pwForm.next !== pwForm.confirm) {
+      setPwError('New passwords do not match.');
+      return;
+    }
+    if (pwForm.next.length < 6) {
+      setPwError('New password must be at least 6 characters.');
+      return;
+    }
+
+    setPwSaving(true);
+    try {
+      const res = await api.patch('/api/users/me/password', {
+        current_password: pwForm.current,
+        new_password: pwForm.next
+      });
+      setPwMessage(res.data.message);
+      setPwForm({ current: '', next: '', confirm: '' });
+    } catch (err) {
+      setPwError(err.response?.data?.error || 'Failed to change password');
+    } finally {
+      setPwSaving(false);
     }
   };
 
@@ -180,6 +215,72 @@ function Profile({ user }) {
               {sending ? 'Sending...' : `Send Test Email${savedEmail ? ` → ${savedEmail}` : ''}`}
             </button>
           </div>
+        </form>
+      </div>
+
+      {/* ── Change Password ── */}
+      <div className="card" style={{ maxWidth: 600, margin: '0 auto 2rem' }}>
+        <h2 style={{ marginBottom: '0.5rem' }}>Change Password</h2>
+        <p style={{ color: '#666', marginBottom: '1.5rem', fontSize: '14px' }}>
+          You must enter your current password to set a new one.
+        </p>
+
+        <form onSubmit={handleChangePassword}>
+          <div className="form-group">
+            <label htmlFor="current_password">Current Password</label>
+            <input
+              id="current_password"
+              type="password"
+              value={pwForm.current}
+              onChange={(e) => setPwForm(prev => ({ ...prev, current: e.target.value }))}
+              required
+              autoComplete="current-password"
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="new_password">New Password</label>
+            <input
+              id="new_password"
+              type="password"
+              value={pwForm.next}
+              onChange={(e) => setPwForm(prev => ({ ...prev, next: e.target.value }))}
+              required
+              minLength={6}
+              autoComplete="new-password"
+            />
+            <p style={{ fontSize: '12px', color: '#888', marginTop: '0.4rem' }}>
+              Minimum 6 characters.
+            </p>
+          </div>
+          <div className="form-group">
+            <label htmlFor="confirm_password">Confirm New Password</label>
+            <input
+              id="confirm_password"
+              type="password"
+              value={pwForm.confirm}
+              onChange={(e) => setPwForm(prev => ({ ...prev, confirm: e.target.value }))}
+              required
+              autoComplete="new-password"
+              style={{
+                borderColor: pwForm.confirm && pwForm.next !== pwForm.confirm ? '#e74c3c' : undefined
+              }}
+            />
+            {pwForm.confirm && pwForm.next !== pwForm.confirm && (
+              <p style={{ fontSize: '12px', color: '#e74c3c', marginTop: '0.4rem' }}>
+                Passwords do not match.
+              </p>
+            )}
+          </div>
+
+          {pwMessage && <div className="success" style={{ marginBottom: '1rem' }}>{pwMessage}</div>}
+          {pwError && <div className="error" style={{ marginBottom: '1rem' }}>{pwError}</div>}
+
+          <button
+            type="submit"
+            disabled={pwSaving || !pwForm.current || !pwForm.next || pwForm.next !== pwForm.confirm}
+          >
+            {pwSaving ? 'Changing...' : 'Change Password'}
+          </button>
         </form>
       </div>
     </div>
