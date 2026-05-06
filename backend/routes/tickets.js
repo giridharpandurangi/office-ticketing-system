@@ -47,6 +47,54 @@ const upload = multer({
 // Avoids the template-literal $ interpretation issue
 function p(n) { return '$' + n; }
 
+// ── GET /api/tickets/stats ───────────────────────────────────────────────────
+
+router.get('/stats', authMiddleware, async (req, res) => {
+  try {
+    const isUser = req.user.role === 'user';
+    const scopeClause = isUser ? 'WHERE created_by = $1' : 'WHERE 1=1';
+    const scopeParams = isUser ? [req.user.id] : [];
+
+    // Count by status
+    const countResult = await pool.query(
+      'SELECT status, COUNT(*) as count FROM tickets ' + scopeClause + ' GROUP BY status',
+      scopeParams
+    );
+
+    const counts = { open: 0, in_progress: 0, waiting_for_approval: 0, resolved: 0, voided: 0 };
+    countResult.rows.forEach(row => {
+      if (counts.hasOwnProperty(row.status)) {
+        counts[row.status] = parseInt(row.count);
+      }
+    });
+
+    // Average resolution time in hours (resolved tickets only)
+    const avgResult = await pool.query(
+      'SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 3600) as avg_hours FROM tickets ' +
+      scopeClause + (scopeClause.includes('WHERE') ? ' AND' : ' WHERE') +
+      " resolved_at IS NOT NULL AND status = 'resolved'",
+      scopeParams
+    );
+
+    const avgHours = avgResult.rows[0].avg_hours
+      ? parseFloat(avgResult.rows[0].avg_hours).toFixed(1)
+      : null;
+
+    // Overdue count (active tickets past due_at)
+    const overdueResult = await pool.query(
+      "SELECT COUNT(*) as count FROM tickets " + scopeClause +
+      (scopeClause.includes('WHERE') ? ' AND' : ' WHERE') +
+      " due_at < NOW() AND status NOT IN ('resolved', 'voided')",
+      scopeParams
+    );
+    const overdue = parseInt(overdueResult.rows[0].count);
+
+    res.json({ counts, avg_resolution_hours: avgHours, overdue });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/tickets ─────────────────────────────────────────────────────────
 
 router.get('/', authMiddleware, async (req, res) => {

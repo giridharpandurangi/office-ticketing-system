@@ -7,6 +7,7 @@ const PAGE_SIZE = 10;
 
 function Dashboard({ user }) {
   const [tickets, setTickets] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -52,6 +53,15 @@ function Dashboard({ user }) {
     }
   }, []);
 
+  const fetchStats = useCallback(async () => {
+    try {
+      const response = await api.get('/api/tickets/stats');
+      setStats(response.data);
+    } catch (err) {
+      console.error('Failed to load stats');
+    }
+  }, []);
+
   const fetchTickets = useCallback(async () => {
     try {
       setLoading(true);
@@ -74,7 +84,8 @@ function Dashboard({ user }) {
   useEffect(() => {
     fetchTickets();
     fetchCategories();
-  }, [fetchTickets, fetchCategories]);
+    fetchStats();
+  }, [fetchTickets, fetchCategories, fetchStats]);
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
@@ -130,6 +141,38 @@ function Dashboard({ user }) {
   return (
     <div className="container">
       <h1>{heading}</h1>
+
+      {/* Stats cards */}
+      {stats && (
+        <div className="stats-grid">
+          <div className="stat-card stat-open">
+            <div className="stat-number">{stats.counts.open}</div>
+            <div className="stat-label">Open</div>
+          </div>
+          <div className="stat-card stat-inprogress">
+            <div className="stat-number">{stats.counts.in_progress + stats.counts.waiting_for_approval}</div>
+            <div className="stat-label">In Progress</div>
+          </div>
+          <div className="stat-card stat-resolved">
+            <div className="stat-number">{stats.counts.resolved}</div>
+            <div className="stat-label">Resolved</div>
+          </div>
+          <div className="stat-card stat-overdue">
+            <div className="stat-number">{stats.overdue}</div>
+            <div className="stat-label">Overdue</div>
+          </div>
+          <div className="stat-card stat-avgtime">
+            <div className="stat-number">
+              {stats.avg_resolution_hours
+                ? stats.avg_resolution_hours >= 24
+                  ? (stats.avg_resolution_hours / 24).toFixed(1) + 'd'
+                  : stats.avg_resolution_hours + 'h'
+                : '—'}
+            </div>
+            <div className="stat-label">Avg Resolution</div>
+          </div>
+        </div>
+      )}
 
       {error && <div className="error">{error}</div>}
 

@@ -602,3 +602,75 @@ button:disabled {
 .btn-green { background: #27ae60; }
 .btn-grey:hover  { background: #636e72; }
 .btn-green:hover { background: #219a52; }
+
+/* ── Stats cards ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 14px;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+  border-top: 4px solid transparent;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+}
+
+.stat-number {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 0.4rem;
+}
+
+.stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #7f8c8d;
+}
+
+.stat-open       { border-top-color: #667eea; }
+.stat-open       .stat-number { color: #667eea; }
+
+.stat-inprogress { border-top-color: #f39c12; }
+.stat-inprogress .stat-number { color: #f39c12; }
+
+.stat-resolved   { border-top-color: #27ae60; }
+.stat-resolved   .stat-number { color: #27ae60; }
+
+.stat-overdue    { border-top-color: #e74c3c; }
+.stat-overdue    .stat-number { color: #e74c3c; }
+
+.stat-avgtime    { border-top-color: #8e44ad; }
+.stat-avgtime    .stat-number { color: #8e44ad; }
+
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .stat-avgtime {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .stat-avgtime {
+    grid-column: span 2;
+  }
+}
