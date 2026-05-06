@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 
 function AdminPanel() {
-  const [activeTab, setActiveTab] = useState('users'); // 'users' | 'workload'
+  const [activeTab, setActiveTab] = useState('users'); // 'users' | 'workload' | 'import'
 
   // ── Users tab state ──────────────────────────────────────────────────────
   const [users, setUsers] = useState([]);
@@ -20,7 +20,13 @@ function AdminPanel() {
   const [newPassword, setNewPassword] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
-  // ── Workload tab state ───────────────────────────────────────────────────
+  // ── Import tab state ────────────────────────────────────────────────────
+  const [importFile, setImportFile] = useState(null);
+  const [autoPassword, setAutoPassword] = useState(true);
+  const [defaultRole, setDefaultRole] = useState('user');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [importError, setImportError] = useState('');
   const [workload, setWorkload] = useState([]);
   const [workloadLoading, setWorkloadLoading] = useState(false);
 
@@ -147,6 +153,29 @@ function AdminPanel() {
     }
   };
 
+  const handleImport = async (e) => {
+    e.preventDefault();
+    if (!importFile || importing) return;
+    setImporting(true);
+    setImportResult(null);
+    setImportError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      formData.append('auto_password', autoPassword ? 'true' : 'false');
+      formData.append('default_role', defaultRole);
+      const res = await api.post('/api/users/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setImportResult(res.data);
+      if (res.data.created.length > 0) fetchUsers();
+    } catch (err) {
+      setImportError(err.response?.data?.error || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // Workload bar — max is the highest total_active across all engineers
   const maxActive = workload.length > 0
     ? Math.max(...workload.map(e => parseInt(e.total_active) || 0), 1)
@@ -158,17 +187,14 @@ function AdminPanel() {
 
       {/* Tab bar */}
       <div className="tab-bar">
-        <button
-          className={`tab-btn${activeTab === 'users' ? ' active' : ''}`}
-          onClick={() => setActiveTab('users')}
-        >
+        <button className={`tab-btn${activeTab === 'users' ? ' active' : ''}`} onClick={() => setActiveTab('users')}>
           👥 User Management
         </button>
-        <button
-          className={`tab-btn${activeTab === 'workload' ? ' active' : ''}`}
-          onClick={() => setActiveTab('workload')}
-        >
+        <button className={`tab-btn${activeTab === 'workload' ? ' active' : ''}`} onClick={() => setActiveTab('workload')}>
           📊 Engineer Workload
+        </button>
+        <button className={`tab-btn${activeTab === 'import' ? ' active' : ''}`} onClick={() => setActiveTab('import')}>
+          📥 Import Users
         </button>
       </div>
 
@@ -340,6 +366,150 @@ function AdminPanel() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Import tab ── */}
+      {activeTab === 'import' && (
+        <div className="card">
+          <h2 style={{ marginBottom: '0.5rem' }}>Import Users from CSV or Excel</h2>
+          <p className="text-muted" style={{ marginBottom: '1.5rem' }}>
+            Upload a <strong>.csv</strong> or <strong>.xlsx</strong> file. Required columns: <code>name</code>, <code>email</code>.
+            Optional: <code>password</code>, <code>role</code> (user / engineer / admin).
+          </p>
+
+          {/* Template download hint */}
+          <div style={{ background: '#f8f9fa', borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '1.5rem', fontSize: '13px', color: '#555' }}>
+            <strong>Column format:</strong> name, email, password, role
+            <br />
+            <span style={{ color: '#888' }}>Example row: John Smith, john@ticketing.local, pass123, user</span>
+          </div>
+
+          <form onSubmit={handleImport}>
+            <div className="form-group">
+              <label>File (CSV or Excel)</label>
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                onChange={(e) => { setImportFile(e.target.files[0] || null); setImportResult(null); setImportError(''); }}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Default Role (used when role column is blank)</label>
+              <select value={defaultRole} onChange={(e) => setDefaultRole(e.target.value)}>
+                <option value="user">User</option>
+                <option value="engineer">Engineer</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: '0.75rem',
+                padding: '0.875rem 1rem',
+                border: '2px solid ' + (autoPassword ? '#667eea' : '#e1e8ed'),
+                borderRadius: 10, cursor: 'pointer', fontWeight: 'normal',
+                background: autoPassword ? 'rgba(102,126,234,0.05)' : 'white'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={autoPassword}
+                  onChange={(e) => setAutoPassword(e.target.checked)}
+                  style={{ width: 'auto', accentColor: '#667eea' }}
+                />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '14px' }}>Auto-generate passwords</div>
+                  <div style={{ fontSize: '12px', color: '#888', marginTop: 2 }}>
+                    If a row has no password, a random one is generated. The generated password is shown in the results below — save it before leaving this page.
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            {importError && <div className="error" style={{ marginBottom: '1rem' }}>{importError}</div>}
+
+            <button type="submit" disabled={importing || !importFile}>
+              {importing ? 'Importing...' : 'Import Users'}
+            </button>
+          </form>
+
+          {/* Results */}
+          {importResult && (
+            <div style={{ marginTop: '2rem' }}>
+              <div className="success" style={{ marginBottom: '1rem' }}>{importResult.message}</div>
+
+              {importResult.created.length > 0 && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <h3 style={{ marginBottom: '0.75rem', color: '#27ae60' }}>
+                    ✅ Created ({importResult.created.length})
+                  </h3>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Generated Password</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importResult.created.map((u) => (
+                        <tr key={u.id}>
+                          <td>{u.name}</td>
+                          <td>{u.email}</td>
+                          <td>{u.role}</td>
+                          <td>
+                            {u.generated_password
+                              ? <code style={{ background: '#fff3cd', padding: '0.2rem 0.4rem', borderRadius: 4 }}>{u.generated_password}</code>
+                              : <span className="text-muted">—</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importResult.created.some(u => u.generated_password) && (
+                    <p style={{ fontSize: '12px', color: '#e67e22', marginTop: '0.5rem' }}>
+                      ⚠️ Save the generated passwords above — they will not be shown again.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {importResult.skipped.length > 0 && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <h3 style={{ marginBottom: '0.75rem', color: '#f39c12' }}>
+                    ⏭ Skipped ({importResult.skipped.length})
+                  </h3>
+                  <table className="table">
+                    <thead><tr><th>Row</th><th>Email</th><th>Reason</th></tr></thead>
+                    <tbody>
+                      {importResult.skipped.map((s, i) => (
+                        <tr key={i}><td>{s.row}</td><td>{s.email}</td><td>{s.reason}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {importResult.errors.length > 0 && (
+                <div>
+                  <h3 style={{ marginBottom: '0.75rem', color: '#e74c3c' }}>
+                    ❌ Errors ({importResult.errors.length})
+                  </h3>
+                  <table className="table">
+                    <thead><tr><th>Row</th><th>Email</th><th>Reason</th></tr></thead>
+                    <tbody>
+                      {importResult.errors.map((e, i) => (
+                        <tr key={i}><td>{e.row}</td><td>{e.email || '—'}</td><td>{e.reason}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>

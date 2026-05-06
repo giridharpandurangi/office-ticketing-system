@@ -1,10 +1,24 @@
 const express = require('express');
 const bcryptjs = require('bcryptjs');
+const multer = require('multer');
+const ExcelJS = require('exceljs');
+const { parse: parseCsv } = require('csv-parse/sync');
 const { pool } = require('../db/init');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
 const { sendTestEmail } = require('../utils/mailer');
 
 const router = express.Router();
+
+// Multer — memory storage for import uploads (no disk write needed)
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    const allowed = /\.(csv|xlsx|xls)$/i;
+    if (allowed.test(file.originalname)) return cb(null, true);
+    cb(new Error('Only CSV and Excel files are supported.'));
+  }
+});
 
 // Get all users (admin only)
 router.get('/', authMiddleware, adminOnly, async (req, res) => {
@@ -314,6 +328,129 @@ router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
     res.json({ message: `User "${userResult.rows[0].name}" has been deleted.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Import users from CSV or Excel (admin only)
+// Expected columns (case-insensitive): name, email, password (optional), role (optional)
+// If password is blank and auto_password=true, generates one automatically
+router.post('/import', authMiddleware, adminOnly, importUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+
+    const autoPassword = req.body.auto_password === 'true';
+    const defaultRole = ['user', 'engineer', 'admin'].includes(req.body.default_role)
+      ? req.body.default_role
+      : 'user';
+
+    // ── Parse file into rows ──────────────────────────────────────────────
+    let rows = [];
+    const ext = req.file.originalname.split('.').pop().toLowerCase();
+
+    if (ext === 'csv') {
+      const text = req.file.buffer.toString('utf8');
+      rows = parseCsv(text, {
+        columns: true,        // first row = headers
+        skip_empty_lines: true,
+        trim: true
+      });
+    } else {
+      // xlsx / xls
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(req.file.buffer);
+      const sheet = workbook.worksheets[0];
+      if (!sheet) return res.status(400).json({ error: 'Excel file has no sheets.' });
+
+      const headers = [];
+      sheet.getRow(1).eachCell(cell => headers.push(String(cell.value || '').trim().toLowerCase()));
+
+      sheet.eachRow((row, rowNum) => {
+        if (rowNum === 1) return; // skip header
+        const obj = {};
+        row.eachCell((cell, colNum) => {
+          const key = headers[colNum - 1];
+          if (key) obj[key] = cell.value !== null && cell.value !== undefined ? String(cell.value).trim() : '';
+        });
+        if (Object.values(obj).some(v => v !== '')) rows.push(obj);
+      });
+    }
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'File is empty or has no data rows.' });
+    }
+
+    // ── Normalise column names (case-insensitive) ─────────────────────────
+    const normalise = (row) => {
+      const out = {};
+      for (const [k, v] of Object.entries(row)) {
+        out[k.toLowerCase().trim()] = typeof v === 'string' ? v.trim() : String(v || '').trim();
+      }
+      return out;
+    };
+
+    // ── Process each row ──────────────────────────────────────────────────
+    const results = { created: [], skipped: [], errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = normalise(rows[i]);
+      const rowNum = i + 2; // +2 because row 1 is header
+
+      const name = row['name'] || row['full name'] || row['fullname'] || '';
+      const email = row['email'] || row['login'] || row['login id'] || '';
+      let password = row['password'] || row['pass'] || '';
+      const role = ['user', 'engineer', 'admin'].includes(row['role'])
+        ? row['role']
+        : defaultRole;
+
+      // Validate required fields
+      if (!name) { results.errors.push({ row: rowNum, reason: 'Missing name' }); continue; }
+      if (!email) { results.errors.push({ row: rowNum, reason: 'Missing email' }); continue; }
+
+      // Auto-generate password if blank and option is set
+      let generatedPassword = null;
+      if (!password) {
+        if (autoPassword) {
+          generatedPassword = Math.random().toString(36).slice(2, 10) +
+            Math.random().toString(36).slice(2, 6).toUpperCase() + '!';
+          password = generatedPassword;
+        } else {
+          results.errors.push({ row: rowNum, email, reason: 'Missing password (or enable auto-generate)' });
+          continue;
+        }
+      }
+
+      if (password.length < 6) {
+        results.errors.push({ row: rowNum, email, reason: 'Password too short (min 6 characters)' });
+        continue;
+      }
+
+      try {
+        const hashedPassword = await bcryptjs.hash(password, 10);
+        const result = await pool.query(
+          'INSERT INTO users (email, password, name, role) VALUES ($1, $2, $3, $4) RETURNING id, email, name, role',
+          [email, hashedPassword, name, role]
+        );
+        results.created.push({
+          ...result.rows[0],
+          generated_password: generatedPassword // null if password was provided
+        });
+      } catch (err) {
+        if (err.code === '23505') {
+          results.skipped.push({ row: rowNum, email, reason: 'Email already exists' });
+        } else {
+          results.errors.push({ row: rowNum, email, reason: err.message });
+        }
+      }
+    }
+
+    res.json({
+      message: results.created.length + ' user(s) imported successfully.',
+      created: results.created,
+      skipped: results.skipped,
+      errors: results.errors
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to process file: ' + err.message });
   }
 });
 

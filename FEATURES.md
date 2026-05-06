@@ -10,7 +10,7 @@ Track all planned features here. Check off each one after it's implemented and t
 - [x] User notification preferences — resolve only / any ticket change / disabled
 - [x] Admin can void (cancel) tickets
 - [x] Admin can assign tickets (currently engineers only)
-- [ ] Import users from CSV or Excel (with auto-generated password option)
+- [x] Import users from CSV or Excel (with auto-generated password option)
 
 ---
 
