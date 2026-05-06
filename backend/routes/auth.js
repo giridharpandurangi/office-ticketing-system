@@ -71,6 +71,11 @@ router.post('/login', [
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Block deactivated accounts
+    if (user.is_active === false) {
+      return res.status(403).json({ error: 'Your account has been deactivated. Please contact your administrator.' });
+    }
+
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,

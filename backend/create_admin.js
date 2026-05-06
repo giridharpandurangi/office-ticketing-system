@@ -1,14 +1,22 @@
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const pool = require('./db/pool');
-const password = 'admin123';
-const email = 'admin@ticketing.local';
-const name = 'Admin User';
+const { initializeDatabase } = require('./db/init');
 
-bcrypt.hash(password, 10)
-  .then(hash => pool.query('INSERT INTO users (email, password, name, role) VALUES ($1, $2, $3, $4) RETURNING id', [email, hash, name, 'admin']))
+const email    = 'admin@ticketing.local';
+const password = 'admin123';
+const name     = 'Admin User';
+
+initializeDatabase()
+  .then(() => bcrypt.hash(password, 10))
+  .then(hash =>
+    pool.query(
+      'INSERT INTO users (email, password, name, role) VALUES ($1, $2, $3, $4) RETURNING id',
+      [email, hash, name, 'admin']
+    )
+  )
   .then(res => {
-    console.log('created', res.rows[0]);
+    console.log('Admin user created:', res.rows[0]);
     return pool.end();
   })
   .catch(err => {

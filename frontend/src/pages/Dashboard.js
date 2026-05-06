@@ -1,14 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api/axios';
+import { getSLAStatus } from '../utils/sla';
+import { exportTicketsToCSV } from '../utils/exportCsv';
+
+const PAGE_SIZE = 10;
 
 function Dashboard({ user }) {
   const [tickets, setTickets] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [filters, setFilters] = useState({ status: '', category: '' });
+  const [searchInput, setSearchInput] = useState('');   // what the user is typing
+  const [searchTerm, setSearchTerm] = useState('');     // debounced value sent to API
   const [categories, setCategories] = useState([]);
+  const [page, setPage] = useState(1);
   const [newTicket, setNewTicket] = useState({
     title: '',
     description: '',
@@ -17,100 +26,155 @@ function Dashboard({ user }) {
     attachments: []
   });
   const navigate = useNavigate();
-  const token = localStorage.getItem('token');
+  const debounceTimer = useRef(null);
 
-  const fetchCategories = async () => {
+  // Debounce search input — wait 400ms after user stops typing before fetching
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchInput(value);
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      setSearchTerm(value);
+      setPage(1);
+    }, 400);
+  };
+
+  const clearSearch = () => {
+    setSearchInput('');
+    setSearchTerm('');
+    setPage(1);
+  };
+
+  const fetchCategories = useCallback(async () => {
     try {
-      const response = await axios.get('/api/categories', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get('/api/categories');
       setCategories(response.data);
     } catch (err) {
       console.error('Failed to load categories');
     }
-  };
+  }, []);
 
-  const fetchTickets = async () => {
+  const fetchStats = useCallback(async () => {
+    try {
+      const response = await api.get('/api/tickets/stats');
+      setStats(response.data);
+    } catch (err) {
+      console.error('Failed to load stats');
+    }
+  }, []);
+
+  const fetchTickets = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
       if (filters.status) params.append('status', filters.status);
       if (filters.category) params.append('category', filters.category);
+      if (searchTerm.trim()) params.append('search', searchTerm.trim());
 
-      const response = await axios.get(`/api/tickets?${params}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/api/tickets?${params}`);
       setTickets(response.data);
       setError('');
+      setPage(1);
     } catch (err) {
       setError('Failed to load tickets');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, searchTerm]);
 
   useEffect(() => {
     fetchTickets();
     fetchCategories();
-  }, [filters]);
+    fetchStats();
+  }, [fetchTickets, fetchCategories, fetchStats]);
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
-    setNewTicket({ ...newTicket, attachments: [...newTicket.attachments, ...files] });
+    setNewTicket(prev => ({ ...prev, attachments: [...prev.attachments, ...files] }));
   };
 
   const removeAttachment = (index) => {
-    const newAttachments = newTicket.attachments.filter((_, i) => i !== index);
-    setNewTicket({ ...newTicket, attachments: newAttachments });
+    setNewTicket(prev => ({
+      ...prev,
+      attachments: prev.attachments.filter((_, i) => i !== index)
+    }));
   };
 
   const handleCreateTicket = async (e) => {
     e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setError('');
     try {
       const payload = {
         title: newTicket.title,
         description: newTicket.description,
         priority: newTicket.priority
       };
+      if (newTicket.category_id) payload.category_id = newTicket.category_id;
 
-      if (newTicket.category_id) {
-        payload.category_id = newTicket.category_id;
-      }
-
-      // Create ticket first
-      const ticketResponse = await axios.post('/api/tickets', payload, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
+      const ticketResponse = await api.post('/api/tickets', payload);
       const ticketId = ticketResponse.data.id;
 
-      // Upload attachments if any
-      if (newTicket.attachments.length > 0) {
-        for (const file of newTicket.attachments) {
-          const formData = new FormData();
-          formData.append('file', file);
-
-          await axios.post(`/api/tickets/${ticketId}/attachments`, formData, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'multipart/form-data'
-            }
-          });
-        }
+      for (const file of newTicket.attachments) {
+        const formData = new FormData();
+        formData.append('file', file);
+        await api.post(`/api/tickets/${ticketId}/attachments`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
       }
 
       setNewTicket({ title: '', description: '', priority: 'medium', category_id: '', attachments: [] });
       setShowForm(false);
       fetchTickets();
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create ticket');
+      setError(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Failed to create ticket');
+    } finally {
+      setSubmitting(false);
     }
   };
 
+  const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
+  const paginatedTickets = tickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const heading = user.role === 'user' ? 'My Tickets' : 'All Tickets';
+  const hasActiveSearch = searchTerm.trim().length > 0;
+
   return (
     <div className="container">
-      <h1>My Tickets</h1>
-      
+      <h1>{heading}</h1>
+
+      {/* Stats cards */}
+      {stats && (
+        <div className="stats-grid">
+          <div className="stat-card stat-open">
+            <div className="stat-number">{stats.counts.open}</div>
+            <div className="stat-label">Open</div>
+          </div>
+          <div className="stat-card stat-inprogress">
+            <div className="stat-number">{stats.counts.in_progress + stats.counts.waiting_for_approval}</div>
+            <div className="stat-label">In Progress</div>
+          </div>
+          <div className="stat-card stat-resolved">
+            <div className="stat-number">{stats.counts.resolved}</div>
+            <div className="stat-label">Resolved</div>
+          </div>
+          <div className="stat-card stat-overdue">
+            <div className="stat-number">{stats.overdue}</div>
+            <div className="stat-label">Overdue</div>
+          </div>
+          <div className="stat-card stat-avgtime">
+            <div className="stat-number">
+              {stats.avg_resolution_hours
+                ? stats.avg_resolution_hours >= 24
+                  ? (stats.avg_resolution_hours / 24).toFixed(1) + 'd'
+                  : stats.avg_resolution_hours + 'h'
+                : '—'}
+            </div>
+            <div className="stat-label">Avg Resolution</div>
+          </div>
+        </div>
+      )}
+
       {error && <div className="error">{error}</div>}
 
       {user.role === 'user' && !showForm && (
@@ -128,7 +192,7 @@ function Dashboard({ user }) {
               <input
                 type="text"
                 value={newTicket.title}
-                onChange={(e) => setNewTicket({ ...newTicket, title: e.target.value })}
+                onChange={(e) => setNewTicket(prev => ({ ...prev, title: e.target.value }))}
                 required
               />
             </div>
@@ -137,7 +201,7 @@ function Dashboard({ user }) {
               <textarea
                 rows="4"
                 value={newTicket.description}
-                onChange={(e) => setNewTicket({ ...newTicket, description: e.target.value })}
+                onChange={(e) => setNewTicket(prev => ({ ...prev, description: e.target.value }))}
                 required
               />
             </div>
@@ -145,7 +209,7 @@ function Dashboard({ user }) {
               <label>Priority</label>
               <select
                 value={newTicket.priority}
-                onChange={(e) => setNewTicket({ ...newTicket, priority: e.target.value })}
+                onChange={(e) => setNewTicket(prev => ({ ...prev, priority: e.target.value }))}
               >
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -156,13 +220,11 @@ function Dashboard({ user }) {
               <label>Category</label>
               <select
                 value={newTicket.category_id}
-                onChange={(e) => setNewTicket({ ...newTicket, category_id: e.target.value })}
+                onChange={(e) => setNewTicket(prev => ({ ...prev, category_id: e.target.value }))}
               >
                 <option value="">Select Category</option>
                 {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
+                  <option key={category.id} value={category.id}>{category.name}</option>
                 ))}
               </select>
             </div>
@@ -179,12 +241,12 @@ function Dashboard({ user }) {
                   <strong>Selected files:</strong>
                   <ul>
                     {newTicket.attachments.map((file, index) => (
-                      <li key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <li key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.25rem 0' }}>
                         <span>{file.name}</span>
                         <button
                           type="button"
                           onClick={() => removeAttachment(index)}
-                          style={{ background: '#e74c3c', color: 'white', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '4px', cursor: 'pointer' }}
+                          style={{ background: '#e74c3c', color: 'white', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}
                         >
                           Remove
                         </button>
@@ -195,7 +257,9 @@ function Dashboard({ user }) {
               )}
             </div>
             <div style={{ display: 'flex', gap: '1rem' }}>
-              <button type="submit">Create Ticket</button>
+              <button type="submit" disabled={submitting}>
+                {submitting ? 'Creating...' : 'Create Ticket'}
+              </button>
               <button type="button" onClick={() => setShowForm(false)} style={{ background: '#95a5a6' }}>
                 Cancel
               </button>
@@ -204,46 +268,138 @@ function Dashboard({ user }) {
         </div>
       )}
 
-      <div className="filters">
-        <select
-          value={filters.status}
-          onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-        >
-          <option value="">All Status</option>
-          <option value="open">Open</option>
-          <option value="in_progress">In Progress</option>
-          <option value="resolved">Resolved</option>
-        </select>
+      {/* Search bar */}
+      <div className="search-bar">
+        <div className="search-input-wrap">
+          <span className="search-icon">🔍</span>
+          <input
+            type="text"
+            placeholder="Search by ticket ID, title or description…"
+            value={searchInput}
+            onChange={handleSearchChange}
+          />
+          {searchInput && (
+            <button className="search-clear" onClick={clearSearch} title="Clear search">✕</button>
+          )}
+        </div>
+      </div>
+
+      {/* Filters + Export */}
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+        <div className="filters" style={{ flex: 1, marginBottom: 0 }}>
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
+          >
+            <option value="">All Statuses</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="waiting_for_approval">Waiting for Approval</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <select
+            value={filters.category}
+            onChange={(e) => setFilters(prev => ({ ...prev, category: e.target.value }))}
+          >
+            <option value="">All Categories</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+        </div>
+        {/* Export button — only shown when there are tickets */}
+        {tickets.length > 0 && (
+          <button
+            onClick={() => {
+              const date = new Date().toISOString().slice(0, 10);
+              const suffix = filters.status ? '_' + filters.status : searchTerm ? '_search' : '';
+              exportTicketsToCSV(tickets, 'tickets' + suffix + '_' + date + '.csv');
+            }}
+            title={`Export ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''} to CSV`}
+            style={{ background: 'linear-gradient(45deg, #27ae60, #2ecc71)', whiteSpace: 'nowrap', padding: '0.875rem 1.25rem', flexShrink: 0 }}
+          >
+            ↓ Export CSV ({tickets.length})
+          </button>
+        )}
       </div>
 
       {loading ? (
         <p>Loading tickets...</p>
       ) : tickets.length === 0 ? (
-        <p>No tickets found</p>
+        <div className="empty-state">
+          {hasActiveSearch
+            ? <p>No tickets found for "<strong>{searchTerm}</strong>".</p>
+            : <p>No tickets found{filters.status || filters.category ? ' for the selected filters' : ''}.</p>
+          }
+        </div>
       ) : (
-        <div>
-          {tickets.map((ticket) => (
-            <div
-              key={ticket.id}
-              className={`ticket-item ${ticket.priority}-priority`}
-              onClick={() => navigate(`/tickets/${ticket.id}`)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h3>#{ticket.id} - {ticket.title}</h3>
-                  <p className="text-muted">{ticket.description.substring(0, 100)}...</p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div>
-                    <span className={`badge badge-${ticket.status}`}>{ticket.status}</span>
-                    <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
+        <>
+          {/* Result count when searching */}
+          {hasActiveSearch && (
+            <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+              {tickets.length} result{tickets.length !== 1 ? 's' : ''} for "<strong>{searchTerm}</strong>"
+            </p>
+          )}
+
+          <div>
+            {paginatedTickets.map((ticket) => (
+              <div
+                key={ticket.id}
+                className={`ticket-item ${ticket.priority}-priority${ticket.status === 'voided' ? ' voided' : ''}${getSLAStatus(ticket)?.status === 'overdue' ? ' overdue' : ''}`}
+                onClick={() => navigate(`/tickets/${ticket.id}`)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3>#{ticket.id} — {ticket.title}</h3>
+                    <p className="text-muted">
+                      {ticket.description.length > 100
+                        ? ticket.description.substring(0, 100) + '…'
+                        : ticket.description}
+                    </p>
                   </div>
-                  <p className="text-muted">By {ticket.created_by_name}</p>
+                  <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '1rem' }}>
+                    <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span className={`badge badge-${ticket.status}`}>
+                        {ticket.status.replace(/_/g, ' ')}
+                      </span>
+                      <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
+                      {/* SLA badge — only for active tickets */}
+                      {(() => {
+                        const sla = getSLAStatus(ticket);
+                        if (!sla) return null;
+                        const icon = sla.status === 'overdue' ? '🔴' : sla.status === 'warning' ? '🟡' : '🟢';
+                        return (
+                          <span className={`sla-badge sla-${sla.status}`}>
+                            {icon} {sla.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <p className="text-muted" style={{ marginTop: '0.25rem' }}>
+                      {ticket.category_name || 'Uncategorized'} · {ticket.created_by_name || 'Deleted user'}
+                    </p>
+                  </div>
                 </div>
               </div>
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="pagination">
+              <button onClick={() => setPage(p => p - 1)} disabled={page === 1}>← Prev</button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className={p === page ? 'active' : ''}
+                >
+                  {p}
+                </button>
+              ))}
+              <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages}>Next →</button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );

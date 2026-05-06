@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -16,7 +16,13 @@ function App() {
     const token = localStorage.getItem('token');
     const userData = localStorage.getItem('user');
     if (token && userData) {
-      setUser(JSON.parse(userData));
+      try {
+        setUser(JSON.parse(userData));
+      } catch {
+        // Corrupted data — clear it
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
     }
     setLoading(false);
   }, []);
@@ -44,16 +50,21 @@ function App() {
   );
 }
 
+// Fix: Use React Router Link instead of <a href> to avoid full page reloads
 function Navbar({ user, onLogout }) {
   return (
     <nav className="navbar">
-      <div className="navbar-brand">🎫 Ticketing System</div>
+      <Link to="/" className="navbar-brand" style={{ textDecoration: 'none' }}>
+        🎫 Ticketing System
+      </Link>
       <div className="navbar-menu">
-        <span>{user.name} ({user.role})</span>
+        <span className="text-muted" style={{ fontSize: '14px' }}>
+          {user.name} <span style={{ opacity: 0.6 }}>({user.role})</span>
+        </span>
         {user.role === 'admin' && (
-          <a href="/admin" className="nav-link">Admin</a>
+          <Link to="/admin" className="nav-link">Admin</Link>
         )}
-        <a href="/profile" className="nav-link">Settings</a>
+        <Link to="/profile" className="nav-link">Settings</Link>
         <button onClick={onLogout} className="btn-logout">Logout</button>
       </div>
     </nav>

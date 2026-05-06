@@ -34,11 +34,13 @@ const initializeDatabase = async () => {
         category_id INTEGER REFERENCES categories(id),
         priority VARCHAR(50) DEFAULT 'medium',
         status VARCHAR(50) DEFAULT 'open',
-        created_by INTEGER NOT NULL REFERENCES users(id),
+        voided_reason TEXT,
+        created_by INTEGER REFERENCES users(id),
         assigned_to INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        resolved_at TIMESTAMP
+        resolved_at TIMESTAMP,
+        due_at TIMESTAMP
       );
     `);
 
@@ -47,7 +49,7 @@ const initializeDatabase = async () => {
       CREATE TABLE IF NOT EXISTS comments (
         id SERIAL PRIMARY KEY,
         ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL REFERENCES users(id),
+        user_id INTEGER REFERENCES users(id),
         content TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -80,9 +82,44 @@ const initializeDatabase = async () => {
       ON CONFLICT (name) DO NOTHING
     `);
 
-    // Add notification_email column if it doesn't exist (migration)
+    // ── Migrations (safe to run repeatedly) ──────────────────────────────────
+
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(255)`);
+    await pool.query(`ALTER TABLE tickets ALTER COLUMN created_by DROP NOT NULL`);
+    await pool.query(`ALTER TABLE comments ALTER COLUMN user_id DROP NOT NULL`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preference VARCHAR(20) DEFAULT 'all'`);
+    await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS voided_reason TEXT`);
+    await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS due_at TIMESTAMP`);
+
+    // Add is_active column for account deactivation
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`);
+    // Ensure existing users are active
+    await pool.query(`UPDATE users SET is_active = TRUE WHERE is_active IS NULL`);
+
+    // Audit log table — structured record of every ticket change
     await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(255)
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        changed_by INTEGER REFERENCES users(id),
+        action VARCHAR(50) NOT NULL,
+        field VARCHAR(50),
+        old_value TEXT,
+        new_value TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Backfill due_at for existing open/active tickets
+    await pool.query(`
+      UPDATE tickets SET due_at =
+        CASE priority
+          WHEN 'high'   THEN created_at + INTERVAL '4 hours'
+          WHEN 'medium' THEN created_at + INTERVAL '24 hours'
+          WHEN 'low'    THEN created_at + INTERVAL '72 hours'
+          ELSE               created_at + INTERVAL '24 hours'
+        END
+      WHERE due_at IS NULL AND status NOT IN ('resolved', 'voided')
     `);
 
     console.log('Database tables initialized successfully');
