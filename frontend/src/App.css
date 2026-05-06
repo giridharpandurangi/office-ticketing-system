@@ -674,3 +674,43 @@ button:disabled {
     grid-column: span 2;
   }
 }
+
+/* ── Tab bar ── */
+.tab-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid rgba(255,255,255,0.3);
+  padding-bottom: 0;
+}
+
+.tab-btn {
+  background: rgba(255,255,255,0.5);
+  color: #555;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 10px 10px 0 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+  transform: none;
+  transition: all 0.2s ease;
+  margin-bottom: -2px;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover {
+  background: rgba(255,255,255,0.75);
+  color: #333;
+  transform: none;
+  box-shadow: none;
+}
+
+.tab-btn.active {
+  background: rgba(255,255,255,0.95);
+  color: #667eea;
+  border-bottom: 2px solid #667eea;
+  box-shadow: none;
+  transform: none;
+}

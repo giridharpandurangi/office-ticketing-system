@@ -191,7 +191,31 @@ router.patch('/:id/toggle-active', authMiddleware, adminOnly, async (req, res) =
   }
 });
 
-// Update user role (admin only)
+// Get engineer workload — open ticket counts per engineer (admin only)
+router.get('/workload', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        COUNT(t.id) FILTER (WHERE t.status = 'open')                    AS open_count,
+        COUNT(t.id) FILTER (WHERE t.status = 'in_progress')             AS in_progress_count,
+        COUNT(t.id) FILTER (WHERE t.status = 'waiting_for_approval')    AS waiting_count,
+        COUNT(t.id) FILTER (WHERE t.status NOT IN ('resolved','voided') AND t.due_at < NOW()) AS overdue_count,
+        COUNT(t.id) FILTER (WHERE t.status NOT IN ('resolved','voided')) AS total_active
+      FROM users u
+      LEFT JOIN tickets t ON t.assigned_to = u.id
+      WHERE u.role IN ('engineer','admin') AND COALESCE(u.is_active, TRUE) = TRUE
+      GROUP BY u.id, u.name, u.email, u.role
+      ORDER BY total_active DESC, u.name ASC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 router.patch('/:id/role', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { id } = req.params;

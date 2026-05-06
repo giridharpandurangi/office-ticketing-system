@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 
 function AdminPanel() {
+  const [activeTab, setActiveTab] = useState('users'); // 'users' | 'workload'
+
+  // ── Users tab state ──────────────────────────────────────────────────────
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -10,19 +13,37 @@ function AdminPanel() {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [newUser, setNewUser] = useState({ email: '', password: '', name: '', role: 'user' });
-
-  // Confirmation dialogs
   const [pendingRoleChange, setPendingRoleChange] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [pendingReset, setPendingReset] = useState(null);
-  const [pendingToggle, setPendingToggle] = useState(null); // { userId, userName, isActive }
+  const [pendingToggle, setPendingToggle] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+
+  // ── Workload tab state ───────────────────────────────────────────────────
+  const [workload, setWorkload] = useState([]);
+  const [workloadLoading, setWorkloadLoading] = useState(false);
 
   const navigate = useNavigate();
   const ROLE_LABELS = { user: 'User', engineer: 'Engineer', admin: 'Admin' };
 
   useEffect(() => { fetchUsers(); }, []);
+
+  const fetchWorkload = useCallback(async () => {
+    setWorkloadLoading(true);
+    try {
+      const res = await api.get('/api/users/workload');
+      setWorkload(res.data);
+    } catch (err) {
+      console.error('Failed to load workload');
+    } finally {
+      setWorkloadLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'workload') fetchWorkload();
+  }, [activeTab, fetchWorkload]);
 
   const fetchUsers = async () => {
     try {
@@ -81,10 +102,7 @@ function AdminPanel() {
 
   const confirmResetPassword = async () => {
     if (!pendingReset) return;
-    if (!newPassword || newPassword.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
+    if (!newPassword || newPassword.length < 6) { setError('Password must be at least 6 characters.'); return; }
     setActionLoading(true);
     setError('');
     try {
@@ -129,180 +147,219 @@ function AdminPanel() {
     }
   };
 
+  // Workload bar — max is the highest total_active across all engineers
+  const maxActive = workload.length > 0
+    ? Math.max(...workload.map(e => parseInt(e.total_active) || 0), 1)
+    : 1;
+
   return (
     <div className="container">
-      <h1>Admin Panel — User Management</h1>
+      <h1>Admin Panel</h1>
 
-      {error && <div className="error">{error}</div>}
-      {success && <div className="success">{success}</div>}
-
-      {!showForm && (
-        <button onClick={() => setShowForm(true)} style={{ marginBottom: '1rem' }}>
-          + Create New User
+      {/* Tab bar */}
+      <div className="tab-bar">
+        <button
+          className={`tab-btn${activeTab === 'users' ? ' active' : ''}`}
+          onClick={() => setActiveTab('users')}
+        >
+          👥 User Management
         </button>
-      )}
+        <button
+          className={`tab-btn${activeTab === 'workload' ? ' active' : ''}`}
+          onClick={() => setActiveTab('workload')}
+        >
+          📊 Engineer Workload
+        </button>
+      </div>
 
-      {showForm && (
-        <div className="card mb-2">
-          <h2>Create New User</h2>
-          <form onSubmit={handleCreateUser}>
-            <div className="form-group">
-              <label>Name</label>
-              <input
-                type="text"
-                value={newUser.name}
-                onChange={(e) => setNewUser(prev => ({ ...prev, name: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Email / Login ID</label>
-              <input
-                type="text"
-                value={newUser.email}
-                onChange={(e) => setNewUser(prev => ({ ...prev, email: e.target.value }))}
-                required
-                placeholder="e.g. john@ticketing.local"
-              />
-            </div>
-            <div className="form-group">
-              <label>Password</label>
-              <input
-                type="password"
-                value={newUser.password}
-                onChange={(e) => setNewUser(prev => ({ ...prev, password: e.target.value }))}
-                required
-                minLength={6}
-              />
-            </div>
-            <div className="form-group">
-              <label>Role</label>
-              <select
-                value={newUser.role}
-                onChange={(e) => setNewUser(prev => ({ ...prev, role: e.target.value }))}
-              >
-                <option value="user">User</option>
-                <option value="engineer">Engineer</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <button type="submit" disabled={submitting}>
-                {submitting ? 'Creating...' : 'Create User'}
-              </button>
-              <button type="button" onClick={() => setShowForm(false)} style={{ background: '#95a5a6' }}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      {/* ── Users tab ── */}
+      {activeTab === 'users' && (
+        <>
+          {error && <div className="error">{error}</div>}
+          {success && <div className="success">{success}</div>}
 
-      {loading ? (
-        <p>Loading users...</p>
-      ) : (
-        <div className="card">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th className="hide-mobile">Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => {
-                const isActive = u.is_active !== false;
-                return (
-                  <tr key={u.id} style={{ opacity: isActive ? 1 : 0.5 }}>
-                    <td>{u.name}</td>
-                    <td>{u.email}</td>
-                    <td>
-                      <select
-                        value={u.role}
-                        onChange={(e) => requestRoleChange(u.id, u.name, u.role, e.target.value)}
-                        disabled={!isActive}
-                      >
-                        <option value="user">User</option>
-                        <option value="engineer">Engineer</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    </td>
-                    <td>
-                      <span style={{
-                        display: 'inline-block',
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: '20px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        background: isActive ? 'rgba(107,207,127,0.15)' : 'rgba(149,165,166,0.2)',
-                        color: isActive ? '#27ae60' : '#7f8c8d',
-                        border: isActive ? '1px solid rgba(107,207,127,0.4)' : '1px solid rgba(149,165,166,0.4)'
-                      }}>
-                        {isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="hide-mobile">{new Date(u.created_at).toLocaleDateString()}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        <button
-                          className="btn-action btn-blue"
-                          onClick={() => navigate(`/?user=${u.id}`)}
-                        >
-                          Tickets
-                        </button>
-                        <button
-                          className="btn-action btn-orange"
-                          onClick={() => { setPendingReset({ userId: u.id, userName: u.name }); setNewPassword(''); setError(''); }}
-                          disabled={!isActive}
-                        >
-                          Reset PW
-                        </button>
-                        <button
-                          className={`btn-action ${isActive ? 'btn-grey' : 'btn-green'}`}
-                          onClick={() => setPendingToggle({ userId: u.id, userName: u.name, isActive })}
-                        >
-                          {isActive ? 'Deactivate' : 'Reactivate'}
-                        </button>
-                        <button
-                          className="btn-action btn-red"
-                          onClick={() => setPendingDelete({ userId: u.id, userName: u.name })}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
+          {!showForm && (
+            <button onClick={() => setShowForm(true)} style={{ marginBottom: '1rem' }}>
+              + Create New User
+            </button>
+          )}
+
+          {showForm && (
+            <div className="card mb-2">
+              <h2>Create New User</h2>
+              <form onSubmit={handleCreateUser}>
+                <div className="form-group">
+                  <label>Name</label>
+                  <input type="text" value={newUser.name} onChange={(e) => setNewUser(prev => ({ ...prev, name: e.target.value }))} required />
+                </div>
+                <div className="form-group">
+                  <label>Email / Login ID</label>
+                  <input type="text" value={newUser.email} onChange={(e) => setNewUser(prev => ({ ...prev, email: e.target.value }))} required placeholder="e.g. john@ticketing.local" />
+                </div>
+                <div className="form-group">
+                  <label>Password</label>
+                  <input type="password" value={newUser.password} onChange={(e) => setNewUser(prev => ({ ...prev, password: e.target.value }))} required minLength={6} />
+                </div>
+                <div className="form-group">
+                  <label>Role</label>
+                  <select value={newUser.role} onChange={(e) => setNewUser(prev => ({ ...prev, role: e.target.value }))}>
+                    <option value="user">User</option>
+                    <option value="engineer">Engineer</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button type="submit" disabled={submitting}>{submitting ? 'Creating...' : 'Create User'}</button>
+                  <button type="button" onClick={() => setShowForm(false)} style={{ background: '#95a5a6' }}>Cancel</button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {loading ? <p>Loading users...</p> : (
+            <div className="card">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th className="hide-mobile">Created</th>
+                    <th>Actions</th>
                   </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => {
+                    const isActive = u.is_active !== false;
+                    return (
+                      <tr key={u.id} style={{ opacity: isActive ? 1 : 0.5 }}>
+                        <td>{u.name}</td>
+                        <td>{u.email}</td>
+                        <td>
+                          <select value={u.role} onChange={(e) => requestRoleChange(u.id, u.name, u.role, e.target.value)} disabled={!isActive}>
+                            <option value="user">User</option>
+                            <option value="engineer">Engineer</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </td>
+                        <td>
+                          <span style={{
+                            display: 'inline-block', padding: '0.2rem 0.6rem', borderRadius: '20px',
+                            fontSize: '11px', fontWeight: 600,
+                            background: isActive ? 'rgba(107,207,127,0.15)' : 'rgba(149,165,166,0.2)',
+                            color: isActive ? '#27ae60' : '#7f8c8d',
+                            border: isActive ? '1px solid rgba(107,207,127,0.4)' : '1px solid rgba(149,165,166,0.4)'
+                          }}>
+                            {isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td className="hide-mobile">{new Date(u.created_at).toLocaleDateString()}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            <button className="btn-action btn-blue" onClick={() => navigate(`/?user=${u.id}`)}>Tickets</button>
+                            <button className="btn-action btn-orange" onClick={() => { setPendingReset({ userId: u.id, userName: u.name }); setNewPassword(''); setError(''); }} disabled={!isActive}>Reset PW</button>
+                            <button className={`btn-action ${isActive ? 'btn-grey' : 'btn-green'}`} onClick={() => setPendingToggle({ userId: u.id, userName: u.name, isActive })}>
+                              {isActive ? 'Deactivate' : 'Reactivate'}
+                            </button>
+                            <button className="btn-action btn-red" onClick={() => setPendingDelete({ userId: u.id, userName: u.name })}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Workload tab ── */}
+      {activeTab === 'workload' && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Engineer Workload</h2>
+              <p className="text-muted" style={{ marginTop: '0.25rem' }}>Active (non-resolved) tickets currently assigned to each engineer.</p>
+            </div>
+            <button onClick={fetchWorkload} style={{ padding: '0.5rem 1rem', fontSize: '13px' }}>
+              ↻ Refresh
+            </button>
+          </div>
+
+          {workloadLoading ? (
+            <p>Loading workload...</p>
+          ) : workload.length === 0 ? (
+            <p className="text-muted">No engineers found.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {workload.map((eng) => {
+                const total = parseInt(eng.total_active) || 0;
+                const open = parseInt(eng.open_count) || 0;
+                const inProgress = parseInt(eng.in_progress_count) || 0;
+                const waiting = parseInt(eng.waiting_count) || 0;
+                const overdue = parseInt(eng.overdue_count) || 0;
+                const barPct = maxActive > 0 ? (total / maxActive) * 100 : 0;
+
+                return (
+                  <div key={eng.id} style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div>
+                        <strong>{eng.name}</strong>
+                        <span className="text-muted" style={{ marginLeft: '0.5rem', fontSize: '12px' }}>({eng.role})</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {open > 0 && <span className="badge badge-open">{open} open</span>}
+                        {inProgress > 0 && <span className="badge badge-in_progress">{inProgress} in progress</span>}
+                        {waiting > 0 && <span className="badge badge-waiting_for_approval">{waiting} waiting</span>}
+                        {overdue > 0 && (
+                          <span style={{ background: 'rgba(231,76,60,0.12)', color: '#c0392b', border: '1px solid rgba(231,76,60,0.3)', padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
+                            🔴 {overdue} overdue
+                          </span>
+                        )}
+                        <strong style={{ fontSize: '15px', color: total === 0 ? '#27ae60' : '#333' }}>
+                          {total} total
+                        </strong>
+                      </div>
+                    </div>
+                    {/* Workload bar */}
+                    <div style={{ background: '#e1e8ed', borderRadius: '6px', height: '8px', overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%',
+                        width: barPct + '%',
+                        borderRadius: '6px',
+                        background: overdue > 0
+                          ? 'linear-gradient(45deg, #e74c3c, #c0392b)'
+                          : total === 0
+                          ? '#27ae60'
+                          : 'linear-gradient(45deg, #667eea, #764ba2)',
+                        transition: 'width 0.4s ease'
+                      }} />
+                    </div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Role change confirmation */}
+      {/* ── Dialogs ── */}
+
       {pendingRoleChange && (
         <div className="confirm-overlay">
           <div className="confirm-box">
             <h3>Confirm Role Change</h3>
-            <p>
-              Change <strong>{pendingRoleChange.userName}</strong>'s role to{' '}
-              <strong>{ROLE_LABELS[pendingRoleChange.newRole]}</strong>?
-            </p>
+            <p>Change <strong>{pendingRoleChange.userName}</strong>'s role to <strong>{ROLE_LABELS[pendingRoleChange.newRole]}</strong>?</p>
             <div className="confirm-actions">
               <button onClick={() => setPendingRoleChange(null)} style={{ background: '#6c757d' }}>Cancel</button>
-              <button onClick={confirmRoleChange} disabled={actionLoading}>
-                {actionLoading ? 'Saving...' : 'Confirm'}
-              </button>
+              <button onClick={confirmRoleChange} disabled={actionLoading}>{actionLoading ? 'Saving...' : 'Confirm'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Reset password dialog */}
       {pendingReset && (
         <div className="confirm-overlay">
           <div className="confirm-box">
@@ -311,56 +368,30 @@ function AdminPanel() {
             {error && <div className="error" style={{ marginBottom: '1rem' }}>{error}</div>}
             <div className="form-group">
               <label>New Password</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Minimum 6 characters"
-                minLength={6}
-                autoFocus
-              />
+              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Minimum 6 characters" minLength={6} autoFocus />
             </div>
             <div className="confirm-actions">
               <button onClick={() => { setPendingReset(null); setError(''); }} style={{ background: '#6c757d' }}>Cancel</button>
-              <button onClick={confirmResetPassword} disabled={actionLoading || newPassword.length < 6}>
-                {actionLoading ? 'Resetting...' : 'Reset Password'}
-              </button>
+              <button onClick={confirmResetPassword} disabled={actionLoading || newPassword.length < 6}>{actionLoading ? 'Resetting...' : 'Reset Password'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Deactivate / Reactivate confirmation */}
       {pendingToggle && (
         <div className="confirm-overlay">
           <div className="confirm-box">
             <h3>{pendingToggle.isActive ? 'Deactivate User' : 'Reactivate User'}</h3>
             <p>
               {pendingToggle.isActive ? (
-                <>
-                  Deactivate <strong>{pendingToggle.userName}</strong>?
-                  <br />
-                  <span style={{ fontSize: '13px', color: '#888' }}>
-                    They will be immediately logged out and unable to log back in. Their tickets and history are preserved.
-                  </span>
-                </>
+                <>Deactivate <strong>{pendingToggle.userName}</strong>?<br /><span style={{ fontSize: '13px', color: '#888' }}>They will be immediately logged out and unable to log back in. Their tickets and history are preserved.</span></>
               ) : (
-                <>
-                  Reactivate <strong>{pendingToggle.userName}</strong>?
-                  <br />
-                  <span style={{ fontSize: '13px', color: '#888' }}>
-                    They will be able to log in again with their existing credentials.
-                  </span>
-                </>
+                <>Reactivate <strong>{pendingToggle.userName}</strong>?<br /><span style={{ fontSize: '13px', color: '#888' }}>They will be able to log in again with their existing credentials.</span></>
               )}
             </p>
             <div className="confirm-actions">
               <button onClick={() => setPendingToggle(null)} style={{ background: '#6c757d' }}>Cancel</button>
-              <button
-                onClick={confirmToggleActive}
-                disabled={actionLoading}
-                style={pendingToggle.isActive ? { background: 'linear-gradient(45deg, #e67e22, #d35400)' } : undefined}
-              >
+              <button onClick={confirmToggleActive} disabled={actionLoading} style={pendingToggle.isActive ? { background: 'linear-gradient(45deg, #e67e22, #d35400)' } : undefined}>
                 {actionLoading ? 'Saving...' : pendingToggle.isActive ? 'Deactivate' : 'Reactivate'}
               </button>
             </div>
@@ -368,26 +399,18 @@ function AdminPanel() {
         </div>
       )}
 
-      {/* Delete confirmation */}
       {pendingDelete && (
         <div className="confirm-overlay">
           <div className="confirm-box">
             <h3>Delete User</h3>
             <p>
-              Are you sure you want to delete <strong>{pendingDelete.userName}</strong>?
-              <br />
-              <span style={{ color: '#e74c3c', fontSize: '14px' }}>
-                This cannot be undone. Their tickets will remain but become unassigned.
-              </span>
+              Are you sure you want to delete <strong>{pendingDelete.userName}</strong>?<br />
+              <span style={{ color: '#e74c3c', fontSize: '14px' }}>This cannot be undone. Their tickets will remain but become unassigned.</span>
             </p>
             {error && <div className="error" style={{ margin: '1rem 0' }}>{error}</div>}
             <div className="confirm-actions">
               <button onClick={() => { setPendingDelete(null); setError(''); }} style={{ background: '#6c757d' }}>Cancel</button>
-              <button
-                onClick={confirmDelete}
-                disabled={actionLoading}
-                style={{ background: 'linear-gradient(45deg, #e74c3c, #c0392b)' }}
-              >
+              <button onClick={confirmDelete} disabled={actionLoading} style={{ background: 'linear-gradient(45deg, #e74c3c, #c0392b)' }}>
                 {actionLoading ? 'Deleting...' : 'Delete User'}
               </button>
             </div>
