@@ -32,7 +32,7 @@ Track all planned features here. Check off each one after it's implemented and t
 ### Visibility & Reporting
 - [x] Dashboard stats — summary cards showing open / in-progress / resolved counts and average resolution time
 - [x] Engineer workload view — how many open tickets each engineer currently has
-- [ ] Export tickets to CSV — for reporting and management review
+- [x] Export tickets to CSV — for reporting and management review
 
 ### Operational
 - [ ] Audit log — record of who changed what and when on every ticket

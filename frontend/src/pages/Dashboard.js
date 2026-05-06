@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { getSLAStatus } from '../utils/sla';
+import { exportTicketsToCSV } from '../utils/exportCsv';
 
 const PAGE_SIZE = 10;
 
@@ -283,27 +284,43 @@ function Dashboard({ user }) {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="filters">
-        <select
-          value={filters.status}
-          onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
-        >
-          <option value="">All Statuses</option>
-          <option value="open">Open</option>
-          <option value="in_progress">In Progress</option>
-          <option value="waiting_for_approval">Waiting for Approval</option>
-          <option value="resolved">Resolved</option>
-        </select>
-        <select
-          value={filters.category}
-          onChange={(e) => setFilters(prev => ({ ...prev, category: e.target.value }))}
-        >
-          <option value="">All Categories</option>
-          {categories.map((cat) => (
-            <option key={cat.id} value={cat.id}>{cat.name}</option>
-          ))}
-        </select>
+      {/* Filters + Export */}
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+        <div className="filters" style={{ flex: 1, marginBottom: 0 }}>
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
+          >
+            <option value="">All Statuses</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="waiting_for_approval">Waiting for Approval</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <select
+            value={filters.category}
+            onChange={(e) => setFilters(prev => ({ ...prev, category: e.target.value }))}
+          >
+            <option value="">All Categories</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+        </div>
+        {/* Export button — only shown when there are tickets */}
+        {tickets.length > 0 && (
+          <button
+            onClick={() => {
+              const date = new Date().toISOString().slice(0, 10);
+              const suffix = filters.status ? '_' + filters.status : searchTerm ? '_search' : '';
+              exportTicketsToCSV(tickets, 'tickets' + suffix + '_' + date + '.csv');
+            }}
+            title={`Export ${tickets.length} ticket${tickets.length !== 1 ? 's' : ''} to CSV`}
+            style={{ background: 'linear-gradient(45deg, #27ae60, #2ecc71)', whiteSpace: 'nowrap', padding: '0.875rem 1.25rem', flexShrink: 0 }}
+          >
+            ↓ Export CSV ({tickets.length})
+          </button>
+        )}
       </div>
 
       {loading ? (
