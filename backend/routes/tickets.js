@@ -389,7 +389,7 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
 
       const updatedTicket = result.rows[0];
 
-      // Email notification
+      // Email to ticket owner on status change (respects notification_preference)
       if (status && updatedTicket.created_by) {
         try {
           const ownerResult = await pool.query(
@@ -414,7 +414,37 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
             }
           }
         } catch (emailError) {
-          console.error('Failed to send email notification:', emailError.message || emailError);
+          console.error('Failed to send status email to ticket owner:', emailError.message || emailError);
+        }
+      }
+
+      // Email to engineer when ticket is assigned to them
+      if (assigned_to && updatedTicket.assigned_to) {
+        try {
+          const engineerResult = await pool.query(
+            'SELECT name, notification_email FROM users WHERE id = $1',
+            [updatedTicket.assigned_to]
+          );
+          if (engineerResult.rows.length > 0) {
+            const engineer = engineerResult.rows[0];
+            if (engineer.notification_email) {
+              const priority = updatedTicket.priority.charAt(0).toUpperCase() + updatedTicket.priority.slice(1);
+              const subject = 'Ticket #' + updatedTicket.id + ' has been assigned to you';
+              const text = 'Hello ' + engineer.name + ',\n\nTicket #' + updatedTicket.id + ' has been assigned to you.\n\nTitle: ' + updatedTicket.title + '\nPriority: ' + priority + '\nStatus: ' + updatedTicket.status.replace(/_/g, ' ') + '\n\nPlease log in to the ticketing system to review and action this ticket.\n\nThank you.';
+              const html = '<p>Hello ' + engineer.name + ',</p>' +
+                '<p>Ticket <strong>#' + updatedTicket.id + '</strong> has been assigned to you.</p>' +
+                '<table style="border-collapse:collapse;margin:1rem 0">' +
+                '<tr><td style="padding:0.3rem 1rem 0.3rem 0;color:#555"><strong>Title</strong></td><td>' + updatedTicket.title + '</td></tr>' +
+                '<tr><td style="padding:0.3rem 1rem 0.3rem 0;color:#555"><strong>Priority</strong></td><td>' + priority + '</td></tr>' +
+                '<tr><td style="padding:0.3rem 1rem 0.3rem 0;color:#555"><strong>Status</strong></td><td>' + updatedTicket.status.replace(/_/g, ' ') + '</td></tr>' +
+                '</table>' +
+                '<p>Please log in to the ticketing system to review and action this ticket.</p>' +
+                '<p>Thank you.</p>';
+              await sendEmail({ to: engineer.notification_email, subject, text, html });
+            }
+          }
+        } catch (emailError) {
+          console.error('Failed to send assignment email to engineer:', emailError.message || emailError);
         }
       }
 

@@ -6,7 +6,7 @@ Track all planned features here. Check off each one after it's implemented and t
 
 ## Your List
 
-- [ ] Email to engineer when a ticket is assigned to them
+- [x] Email to engineer when a ticket is assigned to them
 - [x] User notification preferences — resolve only / any ticket change / disabled
 - [x] Admin can void (cancel) tickets
 - [x] Admin can assign tickets (currently engineers only)
