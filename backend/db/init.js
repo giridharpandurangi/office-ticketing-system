@@ -34,7 +34,8 @@ const initializeDatabase = async () => {
         category_id INTEGER REFERENCES categories(id),
         priority VARCHAR(50) DEFAULT 'medium',
         status VARCHAR(50) DEFAULT 'open',
-        created_by INTEGER NOT NULL REFERENCES users(id),
+        voided_reason TEXT,
+        created_by INTEGER REFERENCES users(id),
         assigned_to INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -93,6 +94,11 @@ const initializeDatabase = async () => {
     // Values: 'all' (any status change), 'resolved_only' (only when resolved), 'disabled' (never)
     await pool.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preference VARCHAR(20) DEFAULT 'all'
+    `);
+
+    // Add voided_reason column for voided tickets
+    await pool.query(`
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS voided_reason TEXT
     `);
 
     console.log('Database tables initialized successfully');

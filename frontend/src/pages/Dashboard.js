@@ -283,7 +283,7 @@ function Dashboard({ user }) {
             {paginatedTickets.map((ticket) => (
               <div
                 key={ticket.id}
-                className={`ticket-item ${ticket.priority}-priority`}
+                className={`ticket-item ${ticket.priority}-priority${ticket.status === 'voided' ? ' voided' : ''}`}
                 onClick={() => navigate(`/tickets/${ticket.id}`)}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

@@ -199,6 +199,48 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
   }
 });
 
+// Void ticket — admin only
+router.patch('/:id/void', authMiddleware, (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Access denied. Admins only.' });
+  }
+  next();
+}, [
+  body('reason').notEmpty().withMessage('A reason is required to void a ticket')
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const result = await pool.query(
+      `UPDATE tickets
+       SET status = 'voided', voided_reason = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND status != 'voided'
+       RETURNING *`,
+      [reason, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket not found or already voided' });
+    }
+
+    // Add a system comment recording the void
+    await pool.query(
+      'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
+      [id, req.user.id, `Ticket voided. Reason: ${reason}`]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Update ticket status/assignment — engineers and admins only
 router.patch('/:id', authMiddleware, (req, res, next) => {
   if (req.user.role !== 'engineer' && req.user.role !== 'admin') {
@@ -222,6 +264,15 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Prevent changes to voided tickets
+      const current = await client.query('SELECT status FROM tickets WHERE id = $1', [id]);
+      if (current.rows.length === 0) {
+        return res.status(404).json({ error: 'Ticket not found' });
+      }
+      if (current.rows[0].status === 'voided') {
+        return res.status(400).json({ error: 'Cannot update a voided ticket.' });
+      }
 
       const updates = [];
       const params = [];
@@ -247,11 +298,6 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
 
       const result = await client.query(query, params);
 
-      if (result.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Ticket not found' });
-      }
-
       if (comment) {
         await client.query(
           'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
@@ -275,7 +321,6 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
             const owner = ownerResult.rows[0];
             const pref = owner.notification_preference || 'all';
 
-            // Check if we should send based on preference
             const shouldSend =
               owner.notification_email &&
               pref !== 'disabled' &&
@@ -327,7 +372,7 @@ router.post('/:id/comments', authMiddleware, [
     const { id } = req.params;
     const { content } = req.body;
 
-    const ticketResult = await pool.query('SELECT created_by FROM tickets WHERE id = $1', [id]);
+    const ticketResult = await pool.query('SELECT created_by, status FROM tickets WHERE id = $1', [id]);
     if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
 
     if (req.user.role === 'user' && ticketResult.rows[0].created_by !== req.user.id) {

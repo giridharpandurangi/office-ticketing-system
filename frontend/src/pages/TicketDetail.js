@@ -9,11 +9,14 @@ function TicketDetail({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [newComment, setNewComment] = useState('');
-  const [submittingComment, setSubmittingComment] = useState(false); // Fix #13
+  const [submittingComment, setSubmittingComment] = useState(false);
   const [engineers, setEngineers] = useState([]);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [statusUpdate, setStatusUpdate] = useState({ status: '', comment: '' });
-  const [submittingStatus, setSubmittingStatus] = useState(false); // Fix #13
+  const [submittingStatus, setSubmittingStatus] = useState(false);
+  const [showVoidModal, setShowVoidModal] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [submittingVoid, setSubmittingVoid] = useState(false);
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -37,7 +40,6 @@ function TicketDetail({ user }) {
 
   useEffect(() => {
     fetchTicket();
-    // Fix #11: Admins can also manage tickets
     if (user.role === 'engineer' || user.role === 'admin') {
       fetchEngineers();
     }
@@ -58,7 +60,6 @@ function TicketDetail({ user }) {
     }
   };
 
-  // Fix #3: Assignment-only update — no status means no comment required
   const handleAssignTicket = async (assignedTo) => {
     try {
       await api.patch(`/api/tickets/${id}`, {
@@ -96,11 +97,28 @@ function TicketDetail({ user }) {
     }
   };
 
+  const handleVoidSubmit = async (e) => {
+    e.preventDefault();
+    if (submittingVoid) return;
+    setSubmittingVoid(true);
+    try {
+      await api.patch(`/api/tickets/${id}/void`, { reason: voidReason });
+      setShowVoidModal(false);
+      setVoidReason('');
+      fetchTicket();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to void ticket');
+    } finally {
+      setSubmittingVoid(false);
+    }
+  };
+
   if (loading) return <div className="container"><p>Loading...</p></div>;
   if (error && !ticket) return <div className="container"><div className="error">{error}</div></div>;
   if (!ticket) return <div className="container"><p>Ticket not found</p></div>;
 
   const canManage = user.role === 'engineer' || user.role === 'admin';
+  const isVoided = ticket.status === 'voided';
 
   return (
     <div className="container">
@@ -122,36 +140,39 @@ function TicketDetail({ user }) {
           </div>
         </div>
 
+        {/* Voided reason banner */}
+        {isVoided && ticket.voided_reason && (
+          <div style={{
+            marginTop: '1rem',
+            padding: '0.875rem 1rem',
+            background: 'rgba(231, 76, 60, 0.08)',
+            border: '1px solid rgba(231, 76, 60, 0.3)',
+            borderRadius: '8px',
+            color: '#c0392b'
+          }}>
+            <strong>Void reason:</strong> {ticket.voided_reason}
+          </div>
+        )}
+
         <h3 style={{ marginTop: '1.5rem' }}>Description</h3>
         <p style={{ whiteSpace: 'pre-wrap' }}>{ticket.description}</p>
 
         <div style={{ marginTop: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
-          <div>
-            <strong>Category:</strong> {ticket.category_name || 'N/A'}
-          </div>
-          <div>
-            <strong>Assigned to:</strong> {ticket.assigned_to_name || 'Unassigned'}
-          </div>
-          <div>
-            <strong>Created:</strong> {new Date(ticket.created_at).toLocaleDateString()}
-          </div>
+          <div><strong>Category:</strong> {ticket.category_name || 'N/A'}</div>
+          <div><strong>Assigned to:</strong> {ticket.assigned_to_name || 'Unassigned'}</div>
+          <div><strong>Created:</strong> {new Date(ticket.created_at).toLocaleDateString()}</div>
           {ticket.resolved_at && (
-            <div>
-              <strong>Resolved:</strong> {new Date(ticket.resolved_at).toLocaleDateString()}
-            </div>
+            <div><strong>Resolved:</strong> {new Date(ticket.resolved_at).toLocaleDateString()}</div>
           )}
         </div>
 
-        {/* Fix #2: Use relative URL for attachments instead of hardcoded localhost:5200 */}
+        {/* Attachments */}
         {ticket.attachments && ticket.attachments.length > 0 && (
           <div style={{ marginTop: '1.5rem' }}>
             <h3>Attachments</h3>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginTop: '0.75rem' }}>
               {ticket.attachments.map((attachment) => (
-                <div
-                  key={attachment.id}
-                  style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: '8px', background: '#f8f9fa' }}
-                >
+                <div key={attachment.id} style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: '8px', background: '#f8f9fa' }}>
                   <a
                     href={`/uploads/${attachment.filename}`}
                     target="_blank"
@@ -169,17 +190,25 @@ function TicketDetail({ user }) {
           </div>
         )}
 
-        {/* Fix #11: Show engineer actions for both engineers and admins */}
-        {canManage && (
+        {/* Engineer / Admin actions — hidden for voided tickets */}
+        {canManage && !isVoided && (
           <div style={{ marginTop: '2rem', padding: '1.25rem', background: '#f8f9fa', borderRadius: '8px' }}>
-            <h3>Actions</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h3 style={{ margin: 0 }}>Actions</h3>
+              {/* Void button — admin only */}
+              {user.role === 'admin' && (
+                <button
+                  onClick={() => { setShowVoidModal(true); setVoidReason(''); }}
+                  style={{ background: 'linear-gradient(45deg, #e74c3c, #c0392b)', fontSize: '13px', padding: '0.5rem 1rem' }}
+                >
+                  Void Ticket
+                </button>
+              )}
+            </div>
             <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>Update Status</label>
-                <select
-                  value={ticket.status}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                >
+                <select value={ticket.status} onChange={(e) => handleStatusChange(e.target.value)}>
                   <option value="open">Open</option>
                   <option value="in_progress">In Progress</option>
                   <option value="resolved">Resolved</option>
@@ -187,7 +216,6 @@ function TicketDetail({ user }) {
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label>Assign to</label>
-                {/* Fix #3: Separate handler for assignment — no comment required */}
                 <select
                   value={ticket.assigned_to || ''}
                   onChange={(e) => handleAssignTicket(e.target.value)}
@@ -195,7 +223,7 @@ function TicketDetail({ user }) {
                   <option value="">Unassigned</option>
                   {engineers.map((eng) => (
                     <option key={eng.id} value={eng.id}>
-                      {eng.name}
+                      {eng.name} {eng.role === 'admin' ? '(admin)' : ''}
                     </option>
                   ))}
                 </select>
@@ -204,6 +232,7 @@ function TicketDetail({ user }) {
           </div>
         )}
 
+        {/* Comments */}
         <div style={{ marginTop: '2rem' }}>
           <h3>Comments ({ticket.comments?.length || 0})</h3>
 
@@ -232,22 +261,24 @@ function TicketDetail({ user }) {
             <p className="text-muted" style={{ margin: '1rem 0' }}>No comments yet</p>
           )}
 
-          <form onSubmit={handleAddComment}>
-            <div className="form-group">
-              <label>Add Comment</label>
-              <textarea
-                rows="3"
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                placeholder="Write a comment..."
-                required
-              />
-            </div>
-            {/* Fix #13: Disable while submitting */}
-            <button type="submit" disabled={submittingComment}>
-              {submittingComment ? 'Posting...' : 'Add Comment'}
-            </button>
-          </form>
+          {/* Hide comment form on voided tickets */}
+          {!isVoided && (
+            <form onSubmit={handleAddComment}>
+              <div className="form-group">
+                <label>Add Comment</label>
+                <textarea
+                  rows="3"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Write a comment..."
+                  required
+                />
+              </div>
+              <button type="submit" disabled={submittingComment}>
+                {submittingComment ? 'Posting...' : 'Add Comment'}
+              </button>
+            </form>
+          )}
         </div>
       </div>
 
@@ -256,10 +287,7 @@ function TicketDetail({ user }) {
         <div className="confirm-overlay">
           <div className="confirm-box" style={{ maxWidth: '500px' }}>
             <h3>Update Ticket Status</h3>
-            <p>
-              Changing status to:{' '}
-              <strong>{statusUpdate.status.replace('_', ' ').toUpperCase()}</strong>
-            </p>
+            <p>Changing status to: <strong>{statusUpdate.status.replace('_', ' ').toUpperCase()}</strong></p>
             <form onSubmit={handleStatusUpdateSubmit}>
               <div className="form-group">
                 <label>Comment (Required)</label>
@@ -272,16 +300,52 @@ function TicketDetail({ user }) {
                 />
               </div>
               <div className="confirm-actions">
-                <button
-                  type="button"
-                  onClick={() => setShowStatusModal(false)}
-                  style={{ background: '#6c757d' }}
-                >
+                <button type="button" onClick={() => setShowStatusModal(false)} style={{ background: '#6c757d' }}>
                   Cancel
                 </button>
-                {/* Fix #13: Disable while submitting */}
                 <button type="submit" disabled={submittingStatus}>
                   {submittingStatus ? 'Updating...' : 'Update Status'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Void Ticket Modal */}
+      {showVoidModal && (
+        <div className="confirm-overlay">
+          <div className="confirm-box" style={{ maxWidth: '500px' }}>
+            <h3>Void Ticket</h3>
+            <p>
+              This will cancel ticket <strong>#{ticket.id}</strong> and mark it as voided.
+              <br />
+              <span style={{ fontSize: '13px', color: '#888' }}>
+                The ticket will be locked — no further updates or comments will be allowed.
+              </span>
+            </p>
+            <form onSubmit={handleVoidSubmit}>
+              <div className="form-group">
+                <label>Reason (Required)</label>
+                <textarea
+                  rows="3"
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                  placeholder="Why is this ticket being voided?"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="confirm-actions">
+                <button type="button" onClick={() => setShowVoidModal(false)} style={{ background: '#6c757d' }}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingVoid || !voidReason.trim()}
+                  style={{ background: 'linear-gradient(45deg, #e74c3c, #c0392b)' }}
+                >
+                  {submittingVoid ? 'Voiding...' : 'Void Ticket'}
                 </button>
               </div>
             </form>

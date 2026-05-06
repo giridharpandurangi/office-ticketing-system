@@ -110,11 +110,14 @@ router.post('/me/test-email', authMiddleware, async (req, res) => {
   }
 });
 
-// Get engineers (for assignment dropdown)
+// Get engineers and admins (for assignment dropdown — admins can assign to anyone)
 router.get('/engineers/list', authMiddleware, async (req, res) => {
   try {
+    // Admins see all engineers + admins for assignment
+    // Engineers only see other engineers
+    const roles = req.user.role === 'admin' ? "('engineer', 'admin')" : "('engineer')";
     const result = await pool.query(
-      "SELECT id, email, name FROM users WHERE role = 'engineer' ORDER BY name"
+      `SELECT id, email, name, role FROM users WHERE role IN ${roles} ORDER BY name`
     );
     res.json(result.rows);
   } catch (err) {

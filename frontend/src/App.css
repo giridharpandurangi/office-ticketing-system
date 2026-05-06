@@ -537,3 +537,14 @@ button:disabled {
 .btn-blue:hover  { background: #2980b9; }
 .btn-orange:hover { background: #d35400; }
 .btn-red:hover   { background: #c0392b; }
+
+/* ── Voided ticket badge ── */
+.badge-voided {
+  background: linear-gradient(45deg, #7f8c8d, #636e72);
+  color: white;
+}
+
+.ticket-item.voided {
+  opacity: 0.65;
+  border-left-color: #95a5a6 !important;
+}
