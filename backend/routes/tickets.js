@@ -252,7 +252,7 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
   }
   next();
 }, [
-  body('status').optional().isIn(['open', 'in_progress', 'resolved']),
+  body('status').optional().isIn(['open', 'in_progress', 'waiting_for_approval', 'resolved']),
   body('assigned_to').optional(),
   body('comment').if(body('status').exists()).notEmpty().withMessage('Comment is required when changing ticket status')
 ], async (req, res) => {

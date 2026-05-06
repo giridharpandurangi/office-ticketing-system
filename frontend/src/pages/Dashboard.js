@@ -249,6 +249,7 @@ function Dashboard({ user }) {
           <option value="">All Statuses</option>
           <option value="open">Open</option>
           <option value="in_progress">In Progress</option>
+          <option value="waiting_for_approval">Waiting for Approval</option>
           <option value="resolved">Resolved</option>
         </select>
         <select
@@ -299,7 +300,7 @@ function Dashboard({ user }) {
                   <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '1rem' }}>
                     <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
                       <span className={`badge badge-${ticket.status}`}>
-                        {ticket.status.replace('_', ' ')}
+                        {ticket.status.replace(/_/g, ' ')}
                       </span>
                       <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
                       {/* SLA badge — only for active tickets */}

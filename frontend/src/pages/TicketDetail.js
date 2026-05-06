@@ -135,7 +135,7 @@ function TicketDetail({ user }) {
           </div>
           <div style={{ textAlign: 'right' }}>
             <span className={`badge badge-${ticket.status}`}>
-              {ticket.status.replace('_', ' ')}
+              {ticket.status.replace(/_/g, ' ')}
             </span>
             <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
           </div>
@@ -234,6 +234,7 @@ function TicketDetail({ user }) {
                 <select value={ticket.status} onChange={(e) => handleStatusChange(e.target.value)}>
                   <option value="open">Open</option>
                   <option value="in_progress">In Progress</option>
+                  <option value="waiting_for_approval">Waiting for Approval</option>
                   <option value="resolved">Resolved</option>
                 </select>
               </div>
@@ -310,7 +311,7 @@ function TicketDetail({ user }) {
         <div className="confirm-overlay">
           <div className="confirm-box" style={{ maxWidth: '500px' }}>
             <h3>Update Ticket Status</h3>
-            <p>Changing status to: <strong>{statusUpdate.status.replace('_', ' ').toUpperCase()}</strong></p>
+            <p>Changing status to: <strong>{statusUpdate.status.replace(/_/g, ' ').toUpperCase()}</strong></p>
             <form onSubmit={handleStatusUpdateSubmit}>
               <div className="form-group">
                 <label>Comment (Required)</label>

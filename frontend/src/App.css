@@ -591,3 +591,9 @@ button:disabled {
   border-left-color: #e74c3c !important;
   background: rgba(231, 76, 60, 0.03);
 }
+
+/* ── Waiting for approval badge ── */
+.badge-waiting_for_approval {
+  background: linear-gradient(45deg, #8e44ad, #9b59b6);
+  color: white;
+}

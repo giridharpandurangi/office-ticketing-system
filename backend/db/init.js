@@ -39,7 +39,8 @@ const initializeDatabase = async () => {
         assigned_to INTEGER REFERENCES users(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        resolved_at TIMESTAMP
+        resolved_at TIMESTAMP,
+        due_at TIMESTAMP
       );
     `);
 
@@ -48,7 +49,7 @@ const initializeDatabase = async () => {
       CREATE TABLE IF NOT EXISTS comments (
         id SERIAL PRIMARY KEY,
         ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL REFERENCES users(id),
+        user_id INTEGER REFERENCES users(id),
         content TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -81,33 +82,16 @@ const initializeDatabase = async () => {
       ON CONFLICT (name) DO NOTHING
     `);
 
-    // Add notification_email column if it doesn't exist (migration)
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(255)
-    `);
+    // ── Migrations (safe to run repeatedly) ──────────────────────────────────
 
-    // Allow created_by and comments.user_id to be NULL so deleted users don't break history
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_email VARCHAR(255)`);
     await pool.query(`ALTER TABLE tickets ALTER COLUMN created_by DROP NOT NULL`);
     await pool.query(`ALTER TABLE comments ALTER COLUMN user_id DROP NOT NULL`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preference VARCHAR(20) DEFAULT 'all'`);
+    await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS voided_reason TEXT`);
+    await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS due_at TIMESTAMP`);
 
-    // Add notification_preference column — controls when emails are sent to the user
-    // Values: 'all' (any status change), 'resolved_only' (only when resolved), 'disabled' (never)
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_preference VARCHAR(20) DEFAULT 'all'
-    `);
-
-    // Add voided_reason column for voided tickets
-    await pool.query(`
-      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS voided_reason TEXT
-    `);
-
-    // Add due_at column for SLA tracking
-    // Calculated on ticket creation: high = 4hrs, medium = 24hrs, low = 72hrs
-    await pool.query(`
-      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS due_at TIMESTAMP
-    `);
-
-    // Backfill due_at for existing tickets that don't have it yet
+    // Backfill due_at for existing open/active tickets
     await pool.query(`
       UPDATE tickets SET due_at =
         CASE priority

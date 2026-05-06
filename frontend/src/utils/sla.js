@@ -11,7 +11,7 @@ export const SLA_HOURS = { high: 4, medium: 24, low: 72 };
  *   label:  human-readable string like "2h 30m left" or "Overdue by 1d 4h"
  */
 export function getSLAStatus(ticket) {
-  const activeStatuses = ['open', 'in_progress'];
+  const activeStatuses = ['open', 'in_progress', 'waiting_for_approval'];
   if (!activeStatuses.includes(ticket.status) || !ticket.due_at) {
     return null;
   }
