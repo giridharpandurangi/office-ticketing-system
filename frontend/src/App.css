@@ -548,3 +548,46 @@ button:disabled {
   opacity: 0.65;
   border-left-color: #95a5a6 !important;
 }
+
+/* ── SLA badges ── */
+.sla-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.sla-ok {
+  background: rgba(107, 207, 127, 0.15);
+  color: #27ae60;
+  border: 1px solid rgba(107, 207, 127, 0.4);
+}
+
+.sla-warning {
+  background: rgba(255, 193, 7, 0.15);
+  color: #d68910;
+  border: 1px solid rgba(255, 193, 7, 0.4);
+}
+
+.sla-overdue {
+  background: rgba(231, 76, 60, 0.12);
+  color: #c0392b;
+  border: 1px solid rgba(231, 76, 60, 0.35);
+  animation: pulse-overdue 2s ease-in-out infinite;
+}
+
+@keyframes pulse-overdue {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
+
+/* Overdue ticket row highlight in dashboard */
+.ticket-item.overdue {
+  border-left-color: #e74c3c !important;
+  background: rgba(231, 76, 60, 0.03);
+}

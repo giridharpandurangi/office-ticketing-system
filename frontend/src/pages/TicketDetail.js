@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/axios';
+import { getSLAStatus, SLA_HOURS } from '../utils/sla';
 
 function TicketDetail({ user }) {
   const { id } = useParams();
@@ -164,6 +165,28 @@ function TicketDetail({ user }) {
           {ticket.resolved_at && (
             <div><strong>Resolved:</strong> {new Date(ticket.resolved_at).toLocaleDateString()}</div>
           )}
+          {/* SLA info */}
+          {ticket.due_at && (
+            <div>
+              <strong>SLA deadline:</strong>{' '}
+              {new Date(ticket.due_at).toLocaleString()}
+              {' '}
+              <span style={{ fontSize: '12px', color: '#888' }}>
+                ({SLA_HOURS[ticket.priority]}h target)
+              </span>
+            </div>
+          )}
+          {(() => {
+            const sla = getSLAStatus(ticket);
+            if (!sla) return null;
+            const icon = sla.status === 'overdue' ? '🔴' : sla.status === 'warning' ? '🟡' : '🟢';
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <strong>SLA status:</strong>
+                <span className={`sla-badge sla-${sla.status}`}>{icon} {sla.label}</span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Attachments */}

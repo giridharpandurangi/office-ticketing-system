@@ -101,6 +101,24 @@ const initializeDatabase = async () => {
       ALTER TABLE tickets ADD COLUMN IF NOT EXISTS voided_reason TEXT
     `);
 
+    // Add due_at column for SLA tracking
+    // Calculated on ticket creation: high = 4hrs, medium = 24hrs, low = 72hrs
+    await pool.query(`
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS due_at TIMESTAMP
+    `);
+
+    // Backfill due_at for existing tickets that don't have it yet
+    await pool.query(`
+      UPDATE tickets SET due_at =
+        CASE priority
+          WHEN 'high'   THEN created_at + INTERVAL '4 hours'
+          WHEN 'medium' THEN created_at + INTERVAL '24 hours'
+          WHEN 'low'    THEN created_at + INTERVAL '72 hours'
+          ELSE               created_at + INTERVAL '24 hours'
+        END
+      WHERE due_at IS NULL AND status NOT IN ('resolved', 'voided')
+    `);
+
     console.log('Database tables initialized successfully');
   } catch (err) {
     console.error('Error initializing database:', err);

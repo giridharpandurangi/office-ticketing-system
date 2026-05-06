@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
+import { getSLAStatus } from '../utils/sla';
 
 const PAGE_SIZE = 10;
 
@@ -283,7 +284,7 @@ function Dashboard({ user }) {
             {paginatedTickets.map((ticket) => (
               <div
                 key={ticket.id}
-                className={`ticket-item ${ticket.priority}-priority${ticket.status === 'voided' ? ' voided' : ''}`}
+                className={`ticket-item ${ticket.priority}-priority${ticket.status === 'voided' ? ' voided' : ''}${getSLAStatus(ticket)?.status === 'overdue' ? ' overdue' : ''}`}
                 onClick={() => navigate(`/tickets/${ticket.id}`)}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -296,11 +297,22 @@ function Dashboard({ user }) {
                     </p>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '1rem' }}>
-                    <div>
+                    <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
                       <span className={`badge badge-${ticket.status}`}>
                         {ticket.status.replace('_', ' ')}
                       </span>
                       <span className={`badge badge-${ticket.priority}`}>{ticket.priority}</span>
+                      {/* SLA badge — only for active tickets */}
+                      {(() => {
+                        const sla = getSLAStatus(ticket);
+                        if (!sla) return null;
+                        const icon = sla.status === 'overdue' ? '🔴' : sla.status === 'warning' ? '🟡' : '🟢';
+                        return (
+                          <span className={`sla-badge sla-${sla.status}`}>
+                            {icon} {sla.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <p className="text-muted" style={{ marginTop: '0.25rem' }}>
                       {ticket.category_name || 'Uncategorized'} · {ticket.created_by_name || 'Deleted user'}

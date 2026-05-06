@@ -160,10 +160,14 @@ router.post('/', authMiddleware, [
   try {
     const { title, description, priority, category_id } = req.body;
 
+    // SLA due times by priority
+    const SLA_HOURS = { high: 4, medium: 24, low: 72 };
+    const slaHours = SLA_HOURS[priority] || 24;
+
     const result = await pool.query(
-      `INSERT INTO tickets (title, description, priority, category_id, created_by)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [title, description, priority, category_id || null, req.user.id]
+      `INSERT INTO tickets (title, description, priority, category_id, created_by, due_at)
+       VALUES ($1, $2, $3, $4, $5, NOW() + ($6 || ' hours')::INTERVAL) RETURNING *`,
+      [title, description, priority, category_id || null, req.user.id, slaHours]
     );
 
     res.status(201).json(result.rows[0]);
