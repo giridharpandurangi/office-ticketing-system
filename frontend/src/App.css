@@ -597,3 +597,8 @@ button:disabled {
   background: linear-gradient(45deg, #8e44ad, #9b59b6);
   color: white;
 }
+
+.btn-grey  { background: #7f8c8d; }
+.btn-green { background: #27ae60; }
+.btn-grey:hover  { background: #636e72; }
+.btn-green:hover { background: #219a52; }

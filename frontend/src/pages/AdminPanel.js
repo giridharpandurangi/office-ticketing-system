@@ -12,18 +12,17 @@ function AdminPanel() {
   const [newUser, setNewUser] = useState({ email: '', password: '', name: '', role: 'user' });
 
   // Confirmation dialogs
-  const [pendingRoleChange, setPendingRoleChange] = useState(null);   // { userId, userName, newRole }
-  const [pendingDelete, setPendingDelete] = useState(null);           // { userId, userName }
-  const [pendingReset, setPendingReset] = useState(null);             // { userId, userName }
+  const [pendingRoleChange, setPendingRoleChange] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [pendingReset, setPendingReset] = useState(null);
+  const [pendingToggle, setPendingToggle] = useState(null); // { userId, userName, isActive }
   const [newPassword, setNewPassword] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
   const navigate = useNavigate();
   const ROLE_LABELS = { user: 'User', engineer: 'Engineer', admin: 'Admin' };
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  useEffect(() => { fetchUsers(); }, []);
 
   const fetchUsers = async () => {
     try {
@@ -60,7 +59,6 @@ function AdminPanel() {
     }
   };
 
-  // Role change
   const requestRoleChange = (userId, userName, currentRole, newRole) => {
     if (newRole === currentRole) return;
     setPendingRoleChange({ userId, userName, newRole });
@@ -81,7 +79,6 @@ function AdminPanel() {
     }
   };
 
-  // Reset password
   const confirmResetPassword = async () => {
     if (!pendingReset) return;
     if (!newPassword || newPassword.length < 6) {
@@ -102,7 +99,21 @@ function AdminPanel() {
     }
   };
 
-  // Delete user
+  const confirmToggleActive = async () => {
+    if (!pendingToggle) return;
+    setActionLoading(true);
+    try {
+      const res = await api.patch(`/api/users/${pendingToggle.userId}/toggle-active`);
+      showSuccess(res.data.message);
+      fetchUsers();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to update account status');
+    } finally {
+      setPendingToggle(null);
+      setActionLoading(false);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     setActionLoading(true);
@@ -197,50 +208,76 @@ function AdminPanel() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Status</th>
                 <th className="hide-mobile">Created</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.name}</td>
-                  <td>{u.email}</td>
-                  <td>
-                    <select
-                      value={u.role}
-                      onChange={(e) => requestRoleChange(u.id, u.name, u.role, e.target.value)}
-                    >
-                      <option value="user">User</option>
-                      <option value="engineer">Engineer</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </td>
-                  <td className="hide-mobile">{new Date(u.created_at).toLocaleDateString()}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                      <button
-                        className="btn-action btn-blue"
-                        onClick={() => navigate(`/?user=${u.id}`)}
+              {users.map((u) => {
+                const isActive = u.is_active !== false;
+                return (
+                  <tr key={u.id} style={{ opacity: isActive ? 1 : 0.5 }}>
+                    <td>{u.name}</td>
+                    <td>{u.email}</td>
+                    <td>
+                      <select
+                        value={u.role}
+                        onChange={(e) => requestRoleChange(u.id, u.name, u.role, e.target.value)}
+                        disabled={!isActive}
                       >
-                        Tickets
-                      </button>
-                      <button
-                        className="btn-action btn-orange"
-                        onClick={() => { setPendingReset({ userId: u.id, userName: u.name }); setNewPassword(''); setError(''); }}
-                      >
-                        Reset PW
-                      </button>
-                      <button
-                        className="btn-action btn-red"
-                        onClick={() => setPendingDelete({ userId: u.id, userName: u.name })}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        <option value="user">User</option>
+                        <option value="engineer">Engineer</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </td>
+                    <td>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '20px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        background: isActive ? 'rgba(107,207,127,0.15)' : 'rgba(149,165,166,0.2)',
+                        color: isActive ? '#27ae60' : '#7f8c8d',
+                        border: isActive ? '1px solid rgba(107,207,127,0.4)' : '1px solid rgba(149,165,166,0.4)'
+                      }}>
+                        {isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="hide-mobile">{new Date(u.created_at).toLocaleDateString()}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <button
+                          className="btn-action btn-blue"
+                          onClick={() => navigate(`/?user=${u.id}`)}
+                        >
+                          Tickets
+                        </button>
+                        <button
+                          className="btn-action btn-orange"
+                          onClick={() => { setPendingReset({ userId: u.id, userName: u.name }); setNewPassword(''); setError(''); }}
+                          disabled={!isActive}
+                        >
+                          Reset PW
+                        </button>
+                        <button
+                          className={`btn-action ${isActive ? 'btn-grey' : 'btn-green'}`}
+                          onClick={() => setPendingToggle({ userId: u.id, userName: u.name, isActive })}
+                        >
+                          {isActive ? 'Deactivate' : 'Reactivate'}
+                        </button>
+                        <button
+                          className="btn-action btn-red"
+                          onClick={() => setPendingDelete({ userId: u.id, userName: u.name })}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -256,9 +293,7 @@ function AdminPanel() {
               <strong>{ROLE_LABELS[pendingRoleChange.newRole]}</strong>?
             </p>
             <div className="confirm-actions">
-              <button onClick={() => setPendingRoleChange(null)} style={{ background: '#6c757d' }}>
-                Cancel
-              </button>
+              <button onClick={() => setPendingRoleChange(null)} style={{ background: '#6c757d' }}>Cancel</button>
               <button onClick={confirmRoleChange} disabled={actionLoading}>
                 {actionLoading ? 'Saving...' : 'Confirm'}
               </button>
@@ -286,11 +321,47 @@ function AdminPanel() {
               />
             </div>
             <div className="confirm-actions">
-              <button onClick={() => { setPendingReset(null); setError(''); }} style={{ background: '#6c757d' }}>
-                Cancel
-              </button>
+              <button onClick={() => { setPendingReset(null); setError(''); }} style={{ background: '#6c757d' }}>Cancel</button>
               <button onClick={confirmResetPassword} disabled={actionLoading || newPassword.length < 6}>
                 {actionLoading ? 'Resetting...' : 'Reset Password'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deactivate / Reactivate confirmation */}
+      {pendingToggle && (
+        <div className="confirm-overlay">
+          <div className="confirm-box">
+            <h3>{pendingToggle.isActive ? 'Deactivate User' : 'Reactivate User'}</h3>
+            <p>
+              {pendingToggle.isActive ? (
+                <>
+                  Deactivate <strong>{pendingToggle.userName}</strong>?
+                  <br />
+                  <span style={{ fontSize: '13px', color: '#888' }}>
+                    They will be immediately logged out and unable to log back in. Their tickets and history are preserved.
+                  </span>
+                </>
+              ) : (
+                <>
+                  Reactivate <strong>{pendingToggle.userName}</strong>?
+                  <br />
+                  <span style={{ fontSize: '13px', color: '#888' }}>
+                    They will be able to log in again with their existing credentials.
+                  </span>
+                </>
+              )}
+            </p>
+            <div className="confirm-actions">
+              <button onClick={() => setPendingToggle(null)} style={{ background: '#6c757d' }}>Cancel</button>
+              <button
+                onClick={confirmToggleActive}
+                disabled={actionLoading}
+                style={pendingToggle.isActive ? { background: 'linear-gradient(45deg, #e67e22, #d35400)' } : undefined}
+              >
+                {actionLoading ? 'Saving...' : pendingToggle.isActive ? 'Deactivate' : 'Reactivate'}
               </button>
             </div>
           </div>
@@ -311,9 +382,7 @@ function AdminPanel() {
             </p>
             {error && <div className="error" style={{ margin: '1rem 0' }}>{error}</div>}
             <div className="confirm-actions">
-              <button onClick={() => { setPendingDelete(null); setError(''); }} style={{ background: '#6c757d' }}>
-                Cancel
-              </button>
+              <button onClick={() => { setPendingDelete(null); setError(''); }} style={{ background: '#6c757d' }}>Cancel</button>
               <button
                 onClick={confirmDelete}
                 disabled={actionLoading}

@@ -10,7 +10,7 @@ const router = express.Router();
 router.get('/', authMiddleware, adminOnly, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, email, name, role, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, email, name, role, is_active, created_at FROM users ORDER BY created_at DESC'
     );
     res.json(result.rows);
   } catch (err) {
@@ -157,6 +157,35 @@ router.get('/engineers/list', authMiddleware, async (req, res) => {
       `SELECT id, email, name, role FROM users WHERE role IN ${roles} ORDER BY name`
     );
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Toggle user active/inactive (admin only)
+router.patch('/:id/toggle-active', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (parseInt(id) === req.user.id) {
+      return res.status(400).json({ error: 'You cannot deactivate your own account.' });
+    }
+
+    const userResult = await pool.query('SELECT name, is_active FROM users WHERE id = $1', [id]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const currentlyActive = userResult.rows[0].is_active !== false;
+    const newState = !currentlyActive;
+
+    await pool.query(
+      'UPDATE users SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [newState, id]
+    );
+
+    const action = newState ? 'reactivated' : 'deactivated';
+    res.json({ message: `User "${userResult.rows[0].name}" has been ${action}.`, is_active: newState });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

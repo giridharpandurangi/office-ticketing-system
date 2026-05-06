@@ -91,6 +91,11 @@ const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS voided_reason TEXT`);
     await pool.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS due_at TIMESTAMP`);
 
+    // Add is_active column for account deactivation
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`);
+    // Ensure existing users are active
+    await pool.query(`UPDATE users SET is_active = TRUE WHERE is_active IS NULL`);
+
     // Backfill due_at for existing open/active tickets
     await pool.query(`
       UPDATE tickets SET due_at =
