@@ -3,6 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 import { getSLAStatus, SLA_HOURS } from '../utils/sla';
 
+const ACTION_LABELS = {
+  created:          { label: 'Ticket created',      color: '#667eea' },
+  status_changed:   { label: 'Status changed',      color: '#f39c12' },
+  assigned:         { label: 'Assignment changed',  color: '#8e44ad' },
+  reopened:         { label: 'Ticket re-opened',    color: '#27ae60' },
+  voided:           { label: 'Ticket voided',       color: '#e74c3c' },
+  comment_added:    { label: 'Comment added',       color: '#7f8c8d' },
+  attachment_added: { label: 'Attachment added',    color: '#2980b9' },
+};
+
 function TicketDetail({ user }) {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -21,6 +31,8 @@ function TicketDetail({ user }) {
   const [showReopenModal, setShowReopenModal] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [submittingReopen, setSubmittingReopen] = useState(false);
+  const [auditLog, setAuditLog] = useState([]);
+  const [showAudit, setShowAudit] = useState(false);
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -42,12 +54,22 @@ function TicketDetail({ user }) {
     }
   }, []);
 
+  const fetchAuditLog = useCallback(async () => {
+    try {
+      const response = await api.get(`/api/tickets/${id}/audit`);
+      setAuditLog(response.data);
+    } catch (err) {
+      console.error('Failed to load audit log');
+    }
+  }, [id]);
+
   useEffect(() => {
     fetchTicket();
     if (user.role === 'engineer' || user.role === 'admin') {
       fetchEngineers();
+      fetchAuditLog();
     }
-  }, [id, user.role, fetchTicket, fetchEngineers]);
+  }, [id, user.role, fetchTicket, fetchEngineers, fetchAuditLog]);
 
   const handleAddComment = async (e) => {
     e.preventDefault();
@@ -352,6 +374,61 @@ function TicketDetail({ user }) {
             </form>
           )}
         </div>
+
+        {/* Audit log — engineers and admins only */}
+        {canManage && (
+          <div style={{ marginTop: '2rem' }}>
+            <button
+              type="button"
+              onClick={() => setShowAudit(v => !v)}
+              style={{ background: 'rgba(102,126,234,0.1)', color: '#667eea', fontSize: '13px', padding: '0.4rem 0.875rem', boxShadow: 'none' }}
+            >
+              {showAudit ? '▲ Hide' : '▼ Show'} Audit Log ({auditLog.length})
+            </button>
+
+            {showAudit && (
+              <div style={{ marginTop: '1rem' }}>
+                {auditLog.length === 0 ? (
+                  <p className="text-muted">No audit entries yet.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {auditLog.map((entry) => {
+                      const meta = ACTION_LABELS[entry.action] || { label: entry.action, color: '#95a5a6' };
+                      return (
+                        <div key={entry.id} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', fontSize: '13px' }}>
+                          <span style={{ color: '#aaa', whiteSpace: 'nowrap', paddingTop: '1px' }}>
+                            {new Date(entry.created_at).toLocaleString()}
+                          </span>
+                          <span style={{
+                            background: meta.color + '18',
+                            color: meta.color,
+                            border: '1px solid ' + meta.color + '40',
+                            borderRadius: '12px',
+                            padding: '0.1rem 0.6rem',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            fontSize: '11px'
+                          }}>
+                            {meta.label}
+                          </span>
+                          <span style={{ color: '#555' }}>
+                            <strong>{entry.changed_by_name || 'System'}</strong>
+                            {entry.field && entry.old_value !== null && entry.new_value !== null && (
+                              <> — {entry.old_value} → <strong>{entry.new_value}</strong></>
+                            )}
+                            {entry.field && entry.new_value !== null && entry.old_value === null && (
+                              <> — {entry.new_value}</>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Status Update Modal */}

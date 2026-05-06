@@ -96,6 +96,20 @@ const initializeDatabase = async () => {
     // Ensure existing users are active
     await pool.query(`UPDATE users SET is_active = TRUE WHERE is_active IS NULL`);
 
+    // Audit log table — structured record of every ticket change
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        changed_by INTEGER REFERENCES users(id),
+        action VARCHAR(50) NOT NULL,
+        field VARCHAR(50),
+        old_value TEXT,
+        new_value TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Backfill due_at for existing open/active tickets
     await pool.query(`
       UPDATE tickets SET due_at =

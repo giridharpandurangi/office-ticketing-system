@@ -11,7 +11,7 @@ const router = express.Router();
 
 const SLA_HOURS = { high: 4, medium: 24, low: 72 };
 
-// ── Multer setup ─────────────────────────────────────────────────────────────
+// ── Multer ────────────────────────────────────────────────────────────────────
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -43,11 +43,22 @@ const upload = multer({
   }
 });
 
-// ── Helper: build parameterised placeholder ──────────────────────────────────
-// Avoids the template-literal $ interpretation issue
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function p(n) { return '$' + n; }
 
-// ── GET /api/tickets/stats ───────────────────────────────────────────────────
+async function writeAudit(client, ticketId, userId, action, field, oldValue, newValue) {
+  try {
+    await client.query(
+      'INSERT INTO audit_logs (ticket_id, changed_by, action, field, old_value, new_value) VALUES ($1, $2, $3, $4, $5, $6)',
+      [ticketId, userId || null, action, field || null, oldValue !== undefined ? String(oldValue) : null, newValue !== undefined ? String(newValue) : null]
+    );
+  } catch (err) {
+    console.error('Audit log write failed:', err.message);
+  }
+}
+
+// ── GET /api/tickets/stats ────────────────────────────────────────────────────
 
 router.get('/stats', authMiddleware, async (req, res) => {
   try {
@@ -55,7 +66,6 @@ router.get('/stats', authMiddleware, async (req, res) => {
     const scopeClause = isUser ? 'WHERE created_by = $1' : 'WHERE 1=1';
     const scopeParams = isUser ? [req.user.id] : [];
 
-    // Count by status
     const countResult = await pool.query(
       'SELECT status, COUNT(*) as count FROM tickets ' + scopeClause + ' GROUP BY status',
       scopeParams
@@ -63,12 +73,11 @@ router.get('/stats', authMiddleware, async (req, res) => {
 
     const counts = { open: 0, in_progress: 0, waiting_for_approval: 0, resolved: 0, voided: 0 };
     countResult.rows.forEach(row => {
-      if (counts.hasOwnProperty(row.status)) {
+      if (Object.prototype.hasOwnProperty.call(counts, row.status)) {
         counts[row.status] = parseInt(row.count);
       }
     });
 
-    // Average resolution time in hours (resolved tickets only)
     const avgResult = await pool.query(
       'SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 3600) as avg_hours FROM tickets ' +
       scopeClause + (scopeClause.includes('WHERE') ? ' AND' : ' WHERE') +
@@ -80,22 +89,20 @@ router.get('/stats', authMiddleware, async (req, res) => {
       ? parseFloat(avgResult.rows[0].avg_hours).toFixed(1)
       : null;
 
-    // Overdue count (active tickets past due_at)
     const overdueResult = await pool.query(
-      "SELECT COUNT(*) as count FROM tickets " + scopeClause +
+      'SELECT COUNT(*) as count FROM tickets ' + scopeClause +
       (scopeClause.includes('WHERE') ? ' AND' : ' WHERE') +
       " due_at < NOW() AND status NOT IN ('resolved', 'voided')",
       scopeParams
     );
-    const overdue = parseInt(overdueResult.rows[0].count);
 
-    res.json({ counts, avg_resolution_hours: avgHours, overdue });
+    res.json({ counts, avg_resolution_hours: avgHours, overdue: parseInt(overdueResult.rows[0].count) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── GET /api/tickets ─────────────────────────────────────────────────────────
+// ── GET /api/tickets ──────────────────────────────────────────────────────────
 
 router.get('/', authMiddleware, async (req, res) => {
   try {
@@ -114,36 +121,23 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const params = [];
 
-    if (status) {
-      params.push(status);
-      query += ' AND t.status = ' + p(params.length);
-    }
-    if (assigned_to) {
-      params.push(assigned_to);
-      query += ' AND t.assigned_to = ' + p(params.length);
-    }
-    if (category) {
-      params.push(category);
-      query += ' AND t.category_id = ' + p(params.length);
-    }
+    if (status) { params.push(status); query += ' AND t.status = ' + p(params.length); }
+    if (assigned_to) { params.push(assigned_to); query += ' AND t.assigned_to = ' + p(params.length); }
+    if (category) { params.push(category); query += ' AND t.category_id = ' + p(params.length); }
+
     if (search && search.trim()) {
       const term = search.trim();
       if (/^\d+$/.test(term)) {
-        params.push(term);
-        const n1 = params.length;
-        params.push('%' + term + '%');
-        const n2 = params.length;
+        params.push(term); const n1 = params.length;
+        params.push('%' + term + '%'); const n2 = params.length;
         query += ' AND (t.id = ' + p(n1) + ' OR t.title ILIKE ' + p(n2) + ' OR t.description ILIKE ' + p(n2) + ')';
       } else {
-        params.push('%' + term + '%');
-        const n = params.length;
+        params.push('%' + term + '%'); const n = params.length;
         query += ' AND (t.title ILIKE ' + p(n) + ' OR t.description ILIKE ' + p(n) + ')';
       }
     }
-    if (req.user.role === 'user') {
-      params.push(req.user.id);
-      query += ' AND t.created_by = ' + p(params.length);
-    }
+
+    if (req.user.role === 'user') { params.push(req.user.id); query += ' AND t.created_by = ' + p(params.length); }
 
     query += ' GROUP BY t.id, u.name, e.name, c.name ORDER BY t.created_at DESC';
 
@@ -154,33 +148,24 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// ── GET /api/tickets/:id ─────────────────────────────────────────────────────
+// ── GET /api/tickets/:id ──────────────────────────────────────────────────────
 
 router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
     const ticketResult = await pool.query(
-      [
-        'SELECT t.*, u.name as created_by_name, e.name as assigned_to_name, c.name as category_name,',
-        "COALESCE(json_agg(a) FILTER (WHERE a.id IS NOT NULL), '[]') as attachments",
-        'FROM tickets t',
-        'LEFT JOIN users u ON t.created_by = u.id',
-        'LEFT JOIN users e ON t.assigned_to = e.id',
-        'LEFT JOIN categories c ON t.category_id = c.id',
-        'LEFT JOIN attachments a ON t.id = a.ticket_id',
-        'WHERE t.id = $1',
-        'GROUP BY t.id, u.name, e.name, c.name'
-      ].join(' '),
+      ['SELECT t.*, u.name as created_by_name, e.name as assigned_to_name, c.name as category_name,',
+       "COALESCE(json_agg(a) FILTER (WHERE a.id IS NOT NULL), '[]') as attachments",
+       'FROM tickets t LEFT JOIN users u ON t.created_by = u.id LEFT JOIN users e ON t.assigned_to = e.id',
+       'LEFT JOIN categories c ON t.category_id = c.id LEFT JOIN attachments a ON t.id = a.ticket_id',
+       'WHERE t.id = $1 GROUP BY t.id, u.name, e.name, c.name'].join(' '),
       [id]
     );
 
-    if (ticketResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Ticket not found' });
-    }
+    if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
 
     const ticket = ticketResult.rows[0];
-
     if (req.user.role === 'user' && ticket.created_by !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -196,7 +181,29 @@ router.get('/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// ── POST /api/tickets ────────────────────────────────────────────────────────
+// ── GET /api/tickets/:id/audit ────────────────────────────────────────────────
+
+router.get('/:id/audit', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Only engineers and admins can view audit logs
+    if (req.user.role === 'user') {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const result = await pool.query(
+      'SELECT al.*, u.name as changed_by_name FROM audit_logs al LEFT JOIN users u ON al.changed_by = u.id WHERE al.ticket_id = $1 ORDER BY al.created_at ASC',
+      [id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/tickets ─────────────────────────────────────────────────────────
 
 router.post('/', authMiddleware, [
   body('title').notEmpty().withMessage('Title is required'),
@@ -216,13 +223,16 @@ router.post('/', authMiddleware, [
       [title, description, priority, category_id || null, req.user.id, slaHours]
     );
 
-    res.status(201).json(result.rows[0]);
+    const ticket = result.rows[0];
+    await writeAudit(pool, ticket.id, req.user.id, 'created', null, null, null);
+
+    res.status(201).json(ticket);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── POST /api/tickets/:id/attachments ────────────────────────────────────────
+// ── POST /api/tickets/:id/attachments ─────────────────────────────────────────
 
 router.post('/:id/attachments', authMiddleware, upload.single('file'), async (req, res) => {
   try {
@@ -242,14 +252,15 @@ router.post('/:id/attachments', authMiddleware, upload.single('file'), async (re
       [id, req.file.filename, req.file.originalname, req.file.mimetype, req.file.size, req.file.path, req.user.id]
     );
 
+    await writeAudit(pool, id, req.user.id, 'attachment_added', 'attachment', null, req.file.originalname);
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── PATCH /api/tickets/:id/reopen ────────────────────────────────────────────
-// Users can reopen their own resolved tickets; engineers/admins can reopen any
+// ── PATCH /api/tickets/:id/reopen ─────────────────────────────────────────────
 
 router.patch('/:id/reopen', authMiddleware, [
   body('reason').notEmpty().withMessage('Please describe why you are re-opening this ticket')
@@ -265,27 +276,17 @@ router.patch('/:id/reopen', authMiddleware, [
     if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
 
     const ticket = ticketResult.rows[0];
+    if (ticket.status !== 'resolved') return res.status(400).json({ error: 'Only resolved tickets can be re-opened.' });
+    if (req.user.role === 'user' && ticket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied.' });
 
-    if (ticket.status !== 'resolved') {
-      return res.status(400).json({ error: 'Only resolved tickets can be re-opened.' });
-    }
-    if (req.user.role === 'user' && ticket.created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied.' });
-    }
-
-    // Reset SLA from now
     const slaHours = SLA_HOURS[ticket.priority] || 24;
-
     const result = await pool.query(
       "UPDATE tickets SET status = 'open', resolved_at = NULL, due_at = NOW() + ($1 || ' hours')::INTERVAL, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *",
       [slaHours, id]
     );
 
-    // Record the reopen as a comment
-    await pool.query(
-      'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
-      [id, req.user.id, 'Ticket re-opened. Reason: ' + reason]
-    );
+    await pool.query('INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)', [id, req.user.id, 'Ticket re-opened. Reason: ' + reason]);
+    await writeAudit(pool, id, req.user.id, 'reopened', 'status', 'resolved', 'open');
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -293,7 +294,7 @@ router.patch('/:id/reopen', authMiddleware, [
   }
 });
 
-// ── PATCH /api/tickets/:id/void ──────────────────────────────────────────────
+// ── PATCH /api/tickets/:id/void ───────────────────────────────────────────────
 
 router.patch('/:id/void', authMiddleware, (req, res, next) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied. Admins only.' });
@@ -308,19 +309,18 @@ router.patch('/:id/void', authMiddleware, (req, res, next) => {
     const { id } = req.params;
     const { reason } = req.body;
 
+    const before = await pool.query('SELECT status FROM tickets WHERE id = $1', [id]);
+    if (before.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
+
     const result = await pool.query(
       "UPDATE tickets SET status = 'voided', voided_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status != 'voided' RETURNING *",
       [reason, id]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Ticket not found or already voided' });
-    }
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Ticket not found or already voided' });
 
-    await pool.query(
-      'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
-      [id, req.user.id, 'Ticket voided. Reason: ' + reason]
-    );
+    await pool.query('INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)', [id, req.user.id, 'Ticket voided. Reason: ' + reason]);
+    await writeAudit(pool, id, req.user.id, 'voided', 'status', before.rows[0].status, 'voided');
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -328,8 +328,7 @@ router.patch('/:id/void', authMiddleware, (req, res, next) => {
   }
 });
 
-// ── PATCH /api/tickets/:id ───────────────────────────────────────────────────
-// Engineers and admins only
+// ── PATCH /api/tickets/:id ────────────────────────────────────────────────────
 
 router.patch('/:id', authMiddleware, (req, res, next) => {
   if (req.user.role !== 'engineer' && req.user.role !== 'admin') {
@@ -352,100 +351,99 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
     try {
       await client.query('BEGIN');
 
-      const current = await client.query('SELECT status FROM tickets WHERE id = $1', [id]);
+      const current = await client.query('SELECT status, assigned_to FROM tickets WHERE id = $1', [id]);
       if (current.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
-      if (current.rows[0].status === 'voided') {
-        return res.status(400).json({ error: 'Cannot update a voided ticket.' });
-      }
+      if (current.rows[0].status === 'voided') return res.status(400).json({ error: 'Cannot update a voided ticket.' });
+
+      const oldStatus = current.rows[0].status;
+      const oldAssignedTo = current.rows[0].assigned_to;
 
       const updates = [];
       const params = [];
 
       if (status) {
-        params.push(status);
-        updates.push('status = ' + p(params.length));
+        params.push(status); updates.push('status = ' + p(params.length));
         if (status === 'resolved') updates.push('resolved_at = CURRENT_TIMESTAMP');
       }
       if (assigned_to !== undefined) {
-        params.push(assigned_to || null);
-        updates.push('assigned_to = ' + p(params.length));
+        params.push(assigned_to || null); updates.push('assigned_to = ' + p(params.length));
       }
       if (updates.length === 0) return res.status(400).json({ error: 'No updates provided' });
 
       updates.push('updated_at = CURRENT_TIMESTAMP');
       params.push(id);
-      const query = 'UPDATE tickets SET ' + updates.join(', ') + ' WHERE id = ' + p(params.length) + ' RETURNING *';
-
-      const result = await client.query(query, params);
+      const result = await client.query(
+        'UPDATE tickets SET ' + updates.join(', ') + ' WHERE id = ' + p(params.length) + ' RETURNING *',
+        params
+      );
 
       if (comment) {
-        await client.query(
-          'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
-          [id, req.user.id, comment]
-        );
+        await client.query('INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3)', [id, req.user.id, comment]);
+      }
+
+      // Write audit entries
+      if (status && status !== oldStatus) {
+        await writeAudit(client, id, req.user.id, 'status_changed', 'status', oldStatus, status);
+      }
+      if (assigned_to !== undefined && (assigned_to || null) !== oldAssignedTo) {
+        // Resolve names for readability
+        let oldName = oldAssignedTo ? 'user #' + oldAssignedTo : 'Unassigned';
+        let newName = assigned_to ? 'user #' + assigned_to : 'Unassigned';
+        try {
+          if (oldAssignedTo) {
+            const r = await client.query('SELECT name FROM users WHERE id = $1', [oldAssignedTo]);
+            if (r.rows.length) oldName = r.rows[0].name;
+          }
+          if (assigned_to) {
+            const r = await client.query('SELECT name FROM users WHERE id = $1', [assigned_to]);
+            if (r.rows.length) newName = r.rows[0].name;
+          }
+        } catch (_) {}
+        await writeAudit(client, id, req.user.id, 'assigned', 'assigned_to', oldName, newName);
       }
 
       await client.query('COMMIT');
 
       const updatedTicket = result.rows[0];
 
-      // Email to ticket owner on status change (respects notification_preference)
+      // Email: owner on status change
       if (status && updatedTicket.created_by) {
         try {
-          const ownerResult = await pool.query(
-            'SELECT name, notification_email, notification_preference FROM users WHERE id = $1',
-            [updatedTicket.created_by]
-          );
+          const ownerResult = await pool.query('SELECT name, notification_email, notification_preference FROM users WHERE id = $1', [updatedTicket.created_by]);
           if (ownerResult.rows.length > 0) {
             const owner = ownerResult.rows[0];
             const pref = owner.notification_preference || 'all';
-            const shouldSend =
-              owner.notification_email &&
-              pref !== 'disabled' &&
+            const shouldSend = owner.notification_email && pref !== 'disabled' &&
               (pref === 'all' || (pref === 'resolved_only' && status === 'resolved'));
-
             if (shouldSend) {
               const friendlyStatus = status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
               const subject = 'Ticket #' + updatedTicket.id + ' status updated to ' + friendlyStatus;
               const commentText = comment || 'No comment provided.';
-              const text = 'Hello ' + (owner.name || 'User') + ',\n\nYour ticket titled "' + updatedTicket.title + '" has been updated to "' + friendlyStatus + '".\n\nComment:\n' + commentText + '\n\nThank you.';
-              const html = '<p>Hello ' + (owner.name || 'User') + ',</p><p>Your ticket titled <strong>' + updatedTicket.title + '</strong> has been updated to <strong>' + friendlyStatus + '</strong>.</p><p><strong>Comment:</strong><br />' + commentText.replace(/\n/g, '<br />') + '</p><p>Thank you.</p>';
-              await sendEmail({ to: owner.notification_email, subject, text, html });
+              await sendEmail({
+                to: owner.notification_email, subject,
+                text: 'Hello ' + (owner.name || 'User') + ',\n\nYour ticket "' + updatedTicket.title + '" was updated to "' + friendlyStatus + '".\n\nComment: ' + commentText + '\n\nThank you.',
+                html: '<p>Hello ' + (owner.name || 'User') + ',</p><p>Your ticket <strong>' + updatedTicket.title + '</strong> was updated to <strong>' + friendlyStatus + '</strong>.</p><p><strong>Comment:</strong> ' + commentText + '</p>'
+              });
             }
           }
-        } catch (emailError) {
-          console.error('Failed to send status email to ticket owner:', emailError.message || emailError);
-        }
+        } catch (e) { console.error('Owner email failed:', e.message); }
       }
 
-      // Email to engineer when ticket is assigned to them
+      // Email: engineer on assignment
       if (assigned_to && updatedTicket.assigned_to) {
         try {
-          const engineerResult = await pool.query(
-            'SELECT name, notification_email FROM users WHERE id = $1',
-            [updatedTicket.assigned_to]
-          );
-          if (engineerResult.rows.length > 0) {
-            const engineer = engineerResult.rows[0];
-            if (engineer.notification_email) {
-              const priority = updatedTicket.priority.charAt(0).toUpperCase() + updatedTicket.priority.slice(1);
-              const subject = 'Ticket #' + updatedTicket.id + ' has been assigned to you';
-              const text = 'Hello ' + engineer.name + ',\n\nTicket #' + updatedTicket.id + ' has been assigned to you.\n\nTitle: ' + updatedTicket.title + '\nPriority: ' + priority + '\nStatus: ' + updatedTicket.status.replace(/_/g, ' ') + '\n\nPlease log in to the ticketing system to review and action this ticket.\n\nThank you.';
-              const html = '<p>Hello ' + engineer.name + ',</p>' +
-                '<p>Ticket <strong>#' + updatedTicket.id + '</strong> has been assigned to you.</p>' +
-                '<table style="border-collapse:collapse;margin:1rem 0">' +
-                '<tr><td style="padding:0.3rem 1rem 0.3rem 0;color:#555"><strong>Title</strong></td><td>' + updatedTicket.title + '</td></tr>' +
-                '<tr><td style="padding:0.3rem 1rem 0.3rem 0;color:#555"><strong>Priority</strong></td><td>' + priority + '</td></tr>' +
-                '<tr><td style="padding:0.3rem 1rem 0.3rem 0;color:#555"><strong>Status</strong></td><td>' + updatedTicket.status.replace(/_/g, ' ') + '</td></tr>' +
-                '</table>' +
-                '<p>Please log in to the ticketing system to review and action this ticket.</p>' +
-                '<p>Thank you.</p>';
-              await sendEmail({ to: engineer.notification_email, subject, text, html });
-            }
+          const engResult = await pool.query('SELECT name, notification_email FROM users WHERE id = $1', [updatedTicket.assigned_to]);
+          if (engResult.rows.length > 0 && engResult.rows[0].notification_email) {
+            const eng = engResult.rows[0];
+            const priority = updatedTicket.priority.charAt(0).toUpperCase() + updatedTicket.priority.slice(1);
+            await sendEmail({
+              to: eng.notification_email,
+              subject: 'Ticket #' + updatedTicket.id + ' has been assigned to you',
+              text: 'Hello ' + eng.name + ',\n\nTicket #' + updatedTicket.id + ' "' + updatedTicket.title + '" has been assigned to you.\nPriority: ' + priority + '\n\nPlease log in to review it.\n\nThank you.',
+              html: '<p>Hello ' + eng.name + ',</p><p>Ticket <strong>#' + updatedTicket.id + ' — ' + updatedTicket.title + '</strong> has been assigned to you.</p><p>Priority: <strong>' + priority + '</strong></p><p>Please log in to review it.</p>'
+            });
           }
-        } catch (emailError) {
-          console.error('Failed to send assignment email to engineer:', emailError.message || emailError);
-        }
+        } catch (e) { console.error('Engineer assignment email failed:', e.message); }
       }
 
       res.json(updatedTicket);
@@ -460,7 +458,7 @@ router.patch('/:id', authMiddleware, (req, res, next) => {
   }
 });
 
-// ── POST /api/tickets/:id/comments ───────────────────────────────────────────
+// ── POST /api/tickets/:id/comments ────────────────────────────────────────────
 
 router.post('/:id/comments', authMiddleware, [
   body('content').notEmpty().withMessage('Comment content is required')
@@ -474,14 +472,14 @@ router.post('/:id/comments', authMiddleware, [
 
     const ticketResult = await pool.query('SELECT created_by, status FROM tickets WHERE id = $1', [id]);
     if (ticketResult.rows.length === 0) return res.status(404).json({ error: 'Ticket not found' });
-    if (req.user.role === 'user' && ticketResult.rows[0].created_by !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    if (req.user.role === 'user' && ticketResult.rows[0].created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
     const result = await pool.query(
       'INSERT INTO comments (ticket_id, user_id, content) VALUES ($1, $2, $3) RETURNING *',
       [id, req.user.id, content]
     );
+
+    await writeAudit(pool, id, req.user.id, 'comment_added', null, null, null);
 
     res.status(201).json(result.rows[0]);
   } catch (err) {

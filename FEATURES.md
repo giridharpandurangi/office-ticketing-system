@@ -35,8 +35,8 @@ Track all planned features here. Check off each one after it's implemented and t
 - [x] Export tickets to CSV — for reporting and management review
 
 ### Operational
-- [ ] Audit log — record of who changed what and when on every ticket
-- [ ] Daily email digest — engineers receive a morning summary of their open tickets
+- [x] Audit log — record of who changed what and when on every ticket
+- [x] Daily email digest — engineers receive a morning summary of their open tickets
 
 ---
 

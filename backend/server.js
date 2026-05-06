@@ -9,6 +9,7 @@ const ticketsRoutes = require('./routes/tickets');
 const usersRoutes = require('./routes/users');
 const categoriesRoutes = require('./routes/categories');
 const { initializeDatabase } = require('./db/init');
+const { startDailyDigest, sendDigest } = require('./utils/digest');
 
 // Validate JWT_SECRET exists on startup
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'your_secret_key_here_change_in_production') {
@@ -66,6 +67,21 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
+// Manual digest trigger — admin only, for testing
+app.post('/api/admin/send-digest', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'No token' });
+  try {
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'admin') return res.status(403).json({ error: 'Admins only' });
+    await sendDigest();
+    res.json({ message: 'Digest sent successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Error handling
 app.use((err, req, res, next) => {
   console.error(err);
@@ -78,4 +94,5 @@ const PORT = process.env.PORT || 5200;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Access the application at http://localhost:3000`);
+  startDailyDigest();
 });

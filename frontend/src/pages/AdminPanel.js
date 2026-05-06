@@ -310,9 +310,25 @@ function AdminPanel() {
               <h2 style={{ margin: 0 }}>Engineer Workload</h2>
               <p className="text-muted" style={{ marginTop: '0.25rem' }}>Active (non-resolved) tickets currently assigned to each engineer.</p>
             </div>
-            <button onClick={fetchWorkload} style={{ padding: '0.5rem 1rem', fontSize: '13px' }}>
-              ↻ Refresh
-            </button>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={async () => {
+                  try {
+                    await api.post('/api/admin/send-digest');
+                    alert('Digest emails sent successfully.');
+                  } catch (err) {
+                    alert('Failed: ' + (err.response?.data?.error || err.message));
+                  }
+                }}
+                style={{ padding: '0.5rem 1rem', fontSize: '13px', background: 'linear-gradient(45deg, #8e44ad, #9b59b6)' }}
+                title="Send the daily digest email to all engineers now"
+              >
+                ✉ Send Digest Now
+              </button>
+              <button onClick={fetchWorkload} style={{ padding: '0.5rem 1rem', fontSize: '13px' }}>
+                ↻ Refresh
+              </button>
+            </div>
           </div>
 
           {workloadLoading ? (
