@@ -58,3 +58,28 @@ export function exportTicketsToCSV(tickets, filename) {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Downloads a CSV import template with headers and one example row.
+ * Opens correctly in Excel, Google Sheets, and any spreadsheet app.
+ */
+export function downloadUserImportTemplate() {
+  const rows = [
+    // Header row
+    'name,email,password,role',
+    // Example row
+    'John Smith,john@ticketing.local,changeme123,user'
+  ];
+
+  const csv = rows.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'user_import_template.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

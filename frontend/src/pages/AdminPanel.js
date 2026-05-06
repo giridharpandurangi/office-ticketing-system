@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
+import { downloadUserImportTemplate } from '../utils/exportCsv';
 
 function AdminPanel() {
   const [activeTab, setActiveTab] = useState('users'); // 'users' | 'workload' | 'import'
@@ -380,11 +381,20 @@ function AdminPanel() {
             Optional: <code>password</code>, <code>role</code> (user / engineer / admin).
           </p>
 
-          {/* Template download hint */}
-          <div style={{ background: '#f8f9fa', borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '1.5rem', fontSize: '13px', color: '#555' }}>
-            <strong>Column format:</strong> name, email, password, role
-            <br />
-            <span style={{ color: '#888' }}>Example row: John Smith, john@ticketing.local, pass123, user</span>
+          {/* Template download */}
+          <div style={{ background: '#f8f9fa', borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div style={{ fontSize: '13px', color: '#555' }}>
+              <strong>Column format:</strong> name, email, password, role
+              <br />
+              <span style={{ color: '#888' }}>Example: John Smith, john@ticketing.local, changeme123, user</span>
+            </div>
+            <button
+              type="button"
+              onClick={downloadUserImportTemplate}
+              style={{ background: 'linear-gradient(45deg, #27ae60, #2ecc71)', fontSize: '13px', padding: '0.5rem 1rem', whiteSpace: 'nowrap' }}
+            >
+              ↓ Download Template
+            </button>
           </div>
 
           <form onSubmit={handleImport}>
